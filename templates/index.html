@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head> 
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Report System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-water: #CCF8FE;
+            --color-winter-wizard: #99E1F9;
+            --color-maya-blue: #6AC3F4;
+            --color-brilliant-azure: #4195F4;
+            --color-sapphire: #1054BE;
+            --color-bg: #f6f7fa;
+            --color-card: #fff;
+            --color-border: #e0e3ea;
+            --color-accent: #4195F4;
+            --color-danger: #f47c7c;
+            --color-success: #3bb273;
+            --color-text: #222;
+            --color-muted: #888;
+        }
+        html {
+            font-size: 11.2px;
+        }
+        body {
+            background: var(--color-bg);
+            min-height: 100vh;
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--color-text);
+        }
+        .main-container {
+            background: var(--color-card);
+            border-radius: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            margin: 16px auto;
+            padding: 19px;
+            max-width: 1100px;
+            border: 1px solid var(--color-border);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 19px;
+            color: #111;
+            font-weight: bold;
+            font-size: 2rem;
+        }
+        .upload-section {
+            background: var(--color-card);
+            border-radius: 10px;
+            padding: 10px 10px 8px 10px;
+            margin-bottom: 10px;
+            border: 1.5px solid var(--color-border);
+            transition: box-shadow 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .upload-section:hover {
+            border-color: var(--color-accent);
+            box-shadow: 0 2px 8px rgba(65, 149, 244, 0.08);
+        }
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .upload-btn {
+            background: var(--color-accent);
+            border: none;
+            color: #fff;
+            padding: 5px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: background 0.2s;
+        }
+        .upload-btn:hover {
+            background: #1054BE;
+        }
+        .action-buttons {
+            margin: 10px 0 6px 0;
+        }
+        .btn-action {
+            margin: 2px;
+            border-radius: 7px;
+            font-weight: 600;
+            font-size: 0.74rem;
+            padding: 4px 10px;
+            transition: background 0.15s, color 0.15s;
+            border: none;
+        }
+        .btn-refresh {
+            background: var(--color-accent);
+            color: #fff;
+        }
+        .btn-calculate {
+            background: #e0e3ea;
+            color: #222;
+        }
+        .btn-clear {
+            background: var(--color-danger);
+            color: #fff;
+        }
+        .btn-export {
+            background: #08a045;
+            color: #fff;
+        }
+        .btn-action:hover {
+            background: #333;
+            color: #fff;
+        }
+        .status-card {
+            background: var(--color-card);
+            color: #222;
+            border-radius: 10px;
+            padding: 8px 0;
+            margin: 10px 0;
+            text-align: center;
+            border: 1px solid var(--color-border);
+        }
+        .status-number {
+            font-size: 0.92rem;
+            font-weight: 700;
+            margin: 4px 0;
+            color: #111;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 10px;
+        }
+        .spinner-border {
+            width: 1.3rem;
+            height: 1.3rem;
+        }
+        .alert {
+            border-radius: 8px;
+            border: none;
+            margin: 6px 0;
+            font-size: 0.7rem;
+        }
+        .alert-success {
+            background: #eafaf1;
+            color: var(--color-success);
+        }
+        .alert-danger {
+            background: #fff0f0;
+            color: var(--color-danger);
+        }
+        .table-container {
+            background: var(--color-card);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            margin-top: 10px;
+            border: 1px solid var(--color-border);
+        }
+        .table {
+            margin-bottom: 0;
+            font-size: 0.7rem;
+        }
+        .table th {
+            background: #f6f7fa;
+            color: #222;
+            border: none;
+            font-weight: 600;
+            text-align: center;
+            padding: 6px 4px;
+        }
+        .table td {
+            border: 1px solid var(--color-border);
+            padding: 4px 3px;
+            vertical-align: middle;
+        }
+        .data-type-label {
+            font-weight: 600;
+            color: #222;
+            margin-bottom: 4px;
+            font-size: 0.8rem;
+        }
+        .badge.bg-danger {
+            background: var(--color-danger) !important;
+            color: #fff;
+        }
+        .badge.bg-warning {
+            background: #ffe066 !important;
+            color: #222;
+        }
+    </style>
+</head>
+<body>
+    <!-- Permanent Top Navigation Bar -->
+    <nav class="navbar navbar-light bg-white border-bottom mb-3 px-3" style="border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+        <span class="navbar-brand mb-0 h1" style="font-size:1.2rem;font-weight:bold;">Attendance Report System</span>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-dark btn-sm nav-tab" id="navEmployeeList" onclick="showSection('employeeListSection')">Employee List</button>
+            <button class="btn btn-outline-primary btn-sm nav-tab" id="navMain" onclick="showSection('mainSection')">Main</button>
+            <button class="btn btn-outline-secondary btn-sm nav-tab" id="navReport" onclick="showSection('reportSection')">Report</button>
+        </div>
+    </nav>
+    <div class="container-fluid">
+        <div class="main-container">
+            <div class="header">
+                <h1><strong>Attendance Report System</strong></h1>
+            </div>
+            <div id="alertContainer"></div>
+            <div id="loading" class="loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Processing...</p>
+            </div>
+
+            <!-- Employee List Section -->
+            <div id="employeeListSection" style="display:none;">
+                <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+                    <form id="employeeImportForm" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                        <input type="file" id="employeeImportFile" name="file" accept=".xlsx,.xls,.csv" class="form-control form-control-sm" style="max-width:220px;">
+                        <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-upload"></i> Import</button>
+                    </form>
+                    <form id="addEmployeeForm" class="d-flex gap-1 flex-wrap align-items-center">
+                        <input type="text" name="Name" placeholder="Name" class="form-control form-control-sm" style="width:120px;">
+                        <input type="text" name="ID Number" placeholder="ID Number" class="form-control form-control-sm" style="width:110px;">
+                        <input type="text" name="Dept" placeholder="Dept (optional)" class="form-control form-control-sm" style="width:90px;">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-plus"></i> Add</button>
+                    </form>
+                </div>
+                <div id="employeeListContent"></div>
+            </div>
+
+            <!-- Main Section -->
+            <div id="mainSection" style="display:none;">
+                <!-- Data Import Section -->
+                <div id="importSection">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="upload-section position-relative" id="signinoutCard">
+                                <div class="data-type-label">
+                                    <i class="fas fa-sign-in-alt"></i> Sign In/Out Data
+                                </div>
+                                <div class="file-input-wrapper">
+                                    <input type="file" id="signinoutFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <button class="btn upload-btn" onclick="document.getElementById('signinoutFile').click()">
+                                        <i class="fas fa-upload"></i> Choose File
+                                    </button>
+                                </div>
+                                <div id="signinoutStatus" class="mt-2 text-muted"></div>
+                                <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearSigninoutBtn" title="Clear Sign In/Out" onclick="clearData('signinout')">
+                                    <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="upload-section position-relative" id="applyCard">
+                                <div class="data-type-label">
+                                    <i class="fas fa-file-alt"></i> Apply Data
+                                </div>
+                                <div class="file-input-wrapper">
+                                    <input type="file" id="applyFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <button class="btn upload-btn" onclick="document.getElementById('applyFile').click()">
+                                        <i class="fas fa-upload"></i> Choose File
+                                    </button>
+                                </div>
+                                <div id="applyStatus" class="mt-2 text-muted"></div>
+                                <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearApplyBtn" title="Clear Apply" onclick="clearData('apply')">
+                                    <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="upload-section position-relative" id="otlieuCard">
+                                <div class="data-type-label">
+                                    <i class="fas fa-clock"></i> OT Lieu Data
+                                </div>
+                                <div class="file-input-wrapper">
+                                    <input type="file" id="otlieuFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <button class="btn upload-btn" onclick="document.getElementById('otlieuFile').click()">
+                                        <i class="fas fa-upload"></i> Choose File
+                                    </button>
+                                </div>
+                                <div id="otlieuStatus" class="mt-2 text-muted"></div>
+                                <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearOtlieuBtn" title="Clear OT Lieu" onclick="clearData('otlieu')">
+                                    <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Action Buttons -->
+                <div class="action-buttons mt-3 mb-2">
+                    <button class="btn btn-action btn-calculate" id="calculateBtn" onclick="calculateMain()">
+                        <i class="fas fa-calculator"></i> Calculate
+                    </button>
+                </div>
+                <!-- Data Table Switcher and Table -->
+                <div id="dataTableSwitcherSection" style="display:none;">
+                    <div class="mb-2">
+                        <label for="dataTableSelect" class="form-label">Select Data Table:</label>
+                        <select id="dataTableSelect" class="form-select form-select-sm" style="max-width:200px;display:inline-block;">
+                            <option value="signinout">Sign In/Out</option>
+                            <option value="apply">Apply</option>
+                            <option value="otlieu">OT Lieu</option>
+                        </select>
+                    </div>
+                    <div id="dataTableContainer"></div>
+                </div>
+            </div>
+
+            <!-- Report Section -->
+            <div id="reportSection" style="display:none;">
+                <div class="text-muted">Report page coming soon...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for sheet selection and preview -->
+    <div class="modal fade" id="sheetPreviewModal" tabindex="-1" aria-labelledby="sheetPreviewModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="sheetPreviewModalLabel">Preview & Select Sheet</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div id="sheetSelectContainer" class="mb-3" style="display:none;">
+              <label for="sheetSelect" class="form-label">Choose a sheet:</label>
+              <select id="sheetSelect" class="form-select" style="max-width: 300px;"></select>
+            </div>
+            <div id="sheetPreviewTableContainer"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="confirmImportBtn">Import</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let pendingFile = null;
+        let pendingDataType = null;
+        let previewData = null;
+        let selectedSheet = null;
+        let sheetNames = null;
+        let sheetModal = new bootstrap.Modal(document.getElementById('sheetPreviewModal'));
+        let cachedTables = {signinout: null, apply: null, otlieu: null};
+
+        // Override file upload handlers
+        document.getElementById('signinoutFile').addEventListener('change', function(e) {
+            handleFilePreview(e.target.files[0], 'signinout');
+        });
+        document.getElementById('applyFile').addEventListener('change', function(e) {
+            handleFilePreview(e.target.files[0], 'apply');
+        });
+        document.getElementById('otlieuFile').addEventListener('change', function(e) {
+            handleFilePreview(e.target.files[0], 'otlieu');
+        });
+
+        function handleFilePreview(file, dataType) {
+            if (!file) return;
+            pendingFile = file;
+            pendingDataType = dataType;
+            showLoading(true);
+            showAlert('', '');
+            const formData = new FormData();
+            formData.append('file', file);
+            fetch('/preview_upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    previewData = data.preview;
+                    sheetNames = data.sheet_names;
+                    selectedSheet = sheetNames[0];
+                    showSheetPreviewModal();
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error previewing file: ' + error.message);
+            });
+        }
+
+        function showSheetPreviewModal() {
+            // Populate sheet select if multiple sheets
+            const select = document.getElementById('sheetSelect');
+            const selectContainer = document.getElementById('sheetSelectContainer');
+            if (sheetNames.length > 1) {
+                select.innerHTML = '';
+                sheetNames.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                });
+                select.value = selectedSheet;
+                selectContainer.style.display = '';
+            } else {
+                selectContainer.style.display = 'none';
+            }
+            renderSheetPreview(selectedSheet);
+            select.onchange = function() {
+                selectedSheet = select.value;
+                renderSheetPreview(selectedSheet);
+            };
+            sheetModal.show();
+        }
+
+        function renderSheetPreview(sheet) {
+            const container = document.getElementById('sheetPreviewTableContainer');
+            if (!previewData[sheet]) {
+                container.innerHTML = '<div class="text-danger">No preview available for this sheet.</div>';
+                return;
+            }
+            const columns = previewData[sheet].columns;
+            const rows = previewData[sheet].rows;
+            let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
+            columns.forEach(col => html += `<th>${col}</th>`);
+            html += '</tr></thead><tbody>';
+            rows.forEach(row => {
+                html += '<tr>';
+                row.forEach(cell => html += `<td>${cell}</td>`);
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        document.getElementById('confirmImportBtn').onclick = function() {
+            if (!pendingFile || !pendingDataType || !selectedSheet) return;
+            showLoading(true);
+            showAlert('', '');
+            const formData = new FormData();
+            formData.append('file', pendingFile);
+            formData.append('data_type', pendingDataType);
+            formData.append('sheet_name', selectedSheet);
+            fetch('/import_with_sheet', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                sheetModal.hide();
+                if (data.success) {
+                    showAlert('success', data.message);
+                    updateStatus(pendingDataType, data.rows);
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                sheetModal.hide();
+                showAlert('danger', 'Error importing file: ' + error.message);
+            });
+        };
+
+        function refresh() {
+            showLoading(true);
+            showAlert('', '');
+
+            fetch('/refresh', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    showAlert('success', data.message);
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error refreshing data: ' + error.message);
+            });
+        }
+
+        function calculateAbnormal() {
+            showLoading(true);
+            showAlert('', '');
+
+            fetch('/calculate_abnormal', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    showAlert('success', data.message);
+                    loadAbnormalData();
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error calculating abnormal: ' + error.message);
+            });
+        }
+
+        function loadAbnormalData() {
+            fetch('/get_abnormal_data')
+            .then(response => response.json())
+            .then(data => {
+                if (data.data && data.data.length > 0) {
+                    displayAbnormalData(data.data);
+                } else {
+                    document.getElementById('abnormalTable').style.display = 'none';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading abnormal data:', error);
+            });
+        }
+
+        function displayAbnormalData(data) {
+            const tableBody = document.getElementById('abnormalTableBody');
+            tableBody.innerHTML = '';
+
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${row.Employee}</td>
+                    <td>${row.Date}</td>
+                    <td>${row.SignIn}</td>
+                    <td>${row.SignOut}</td>
+                    <td><span class="badge bg-${row.Status === 'Late' ? 'danger' : 'warning'}">${row.Status}</span></td>
+                    <td>${row.LateMinutes}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+
+            document.getElementById('abnormalTable').style.display = 'block';
+        }
+
+        function clearData(dataType) {
+            if (!confirm(`Are you sure you want to clear ${dataType} data?`)) {
+                return;
+            }
+
+            showLoading(true);
+            showAlert('', '');
+
+            fetch(`/clear/${dataType}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    showAlert('success', data.message);
+                    updateStatus(dataType, 0);
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error clearing data: ' + error.message);
+            });
+        }
+
+        function exportData() {
+            showLoading(true);
+            showAlert('', '');
+
+            fetch('/export')
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                } else {
+                    throw new Error('Export failed');
+                }
+            })
+            .then(blob => {
+                showLoading(false);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `attendance_report_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showAlert('success', 'File exported successfully!');
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error exporting file: ' + error.message);
+            });
+        }
+
+        function updateStatus(dataType, count) {
+            const statusElement = document.getElementById(`${dataType}Status`);
+            const clearBtn = {
+                'signinout': document.getElementById('clearSigninoutBtn'),
+                'apply': document.getElementById('clearApplyBtn'),
+                'otlieu': document.getElementById('clearOtlieuBtn')
+            }[dataType];
+            if (count > 0) {
+                statusElement.innerHTML = `<i class="fas fa-check text-success"></i> ${count} records loaded`;
+                if (clearBtn) clearBtn.classList.remove('d-none');
+            } else {
+                if (clearBtn) clearBtn.classList.add('d-none');
+            }
+        }
+
+        function clearAllData() {
+            if (!confirm('Are you sure you want to clear ALL data?')) return;
+            showLoading(true);
+            showAlert('', '');
+            Promise.all([
+                fetch('/clear/signinout', {method: 'POST'}),
+                fetch('/clear/apply', {method: 'POST'}),
+                fetch('/clear/otlieu', {method: 'POST'})
+            ]).then(() => {
+                showLoading(false);
+                showAlert('success', 'All data cleared successfully!');
+                updateStatus('signinout', 0);
+                updateStatus('apply', 0);
+                updateStatus('otlieu', 0);
+            }).catch(() => {
+                showLoading(false);
+                showAlert('danger', 'Error clearing all data.');
+            });
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showAlert(type, message) {
+            const alertContainer = document.getElementById('alertContainer');
+            if (message) {
+                alertContainer.innerHTML = `
+                    <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+            } else {
+                alertContainer.innerHTML = '';
+            }
+        }
+
+        // Auto-hide alerts after 5 seconds
+        setInterval(() => {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                const bsAlert = new bootstrap.Alert(alert);
+                bsAlert.close();
+            });
+        }, 5000);
+
+        // NAVIGATION LOGIC
+        function showSection(sectionId) {
+            // Hide all
+            document.getElementById('employeeListSection').style.display = 'none';
+            document.getElementById('mainSection').style.display = 'none';
+            document.getElementById('reportSection').style.display = 'none';
+            // Remove active from all navs
+            document.getElementById('navEmployeeList').classList.remove('active');
+            document.getElementById('navMain').classList.remove('active');
+            document.getElementById('navReport').classList.remove('active');
+            // Show selected
+            document.getElementById(sectionId).style.display = '';
+            // Set active nav
+            if(sectionId==='employeeListSection') document.getElementById('navEmployeeList').classList.add('active');
+            if(sectionId==='mainSection') document.getElementById('navMain').classList.add('active');
+            if(sectionId==='reportSection') document.getElementById('navReport').classList.add('active');
+            // Special: reload employee list if needed
+            if(sectionId==='employeeListSection') reloadEmployeeList();
+        }
+        // Default to Main
+        showSection('mainSection');
+
+        // Calculate button logic for Main
+        function calculateMain() {
+            showLoading(true);
+            showAlert('', '');
+            fetch('/calculate_abnormal', {method: 'POST'})
+                .then(res => res.json())
+                .then(data => {
+                    showLoading(false);
+                    if(data.success) {
+                        showAlert('success', data.message);
+                        // Fetch all 3 data tables and cache
+                        Promise.all([
+                            fetch('/get_signinout_data').then(res=>res.json()),
+                            fetch('/get_apply_data').then(res=>res.json()),
+                            fetch('/get_otlieu_data').then(res=>res.json())
+                        ]).then(([signinout, apply, otlieu]) => {
+                            cachedTables.signinout = signinout;
+                            cachedTables.apply = apply;
+                            cachedTables.otlieu = otlieu;
+                            document.getElementById('dataTableSwitcherSection').style.display = '';
+                            renderSelectedTable();
+                        });
+                    } else {
+                        showAlert('danger', data.error);
+                    }
+                })
+                .catch(() => {
+                    showLoading(false);
+                    showAlert('danger', 'Error calculating.');
+                });
+        }
+        document.getElementById('dataTableSelect').onchange = renderSelectedTable;
+        function renderSelectedTable() {
+            const type = document.getElementById('dataTableSelect').value;
+            if (type === 'signinout') {
+                renderTable('dataTableContainer', cachedTables.signinout.columns, cachedTables.signinout.data);
+            } else if (type === 'apply') {
+                renderTable('dataTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
+            } else if (type === 'otlieu') {
+                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+            }
+        }
+        // Enhanced renderTable: highlight new columns if provided
+        function renderTable(containerId, columns, rows, highlightCols=[]) {
+            const pageSize = 50;
+            let currentPage = 1;
+            const totalPages = Math.ceil(rows.length / pageSize);
+            let editingRow = null;
+            function renderPage(page) {
+                let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
+                columns.forEach(col => {
+                    if (highlightCols.includes(col)) {
+                        html += `<th style="background:#d0f0ff;">${col}</th>`;
+                    } else {
+                        html += `<th>${col}</th>`;
+                    }
+                });
+                if (columns.includes('Results')) html += '<th>Action</th>';
+                html += '</tr></thead><tbody>';
+                const start = (page - 1) * pageSize;
+                const end = Math.min(start + pageSize, rows.length);
+                for (let i = start; i < end; i++) {
+                    html += '<tr>';
+                    let row = rows[i];
+                    for (let j = 0; j < columns.length; j++) {
+                        const col = columns[j];
+                        if (editingRow === i && col === 'Results') {
+                            html += `<td><select id="editResults_${i}" class="form-select form-select-sm">
+                                <option value="Approved" ${row[j]==='Approved'?'selected':''}>Approved</option>
+                                <option value="Pending" ${row[j]==='Pending'?'selected':''}>Pending</option>
+                                <option value="Reject" ${row[j]==='Reject'?'selected':''}>Reject</option>
+                            </select></td>`;
+                        } else {
+                            html += `<td>${row[j]}</td>`;
+                        }
+                    }
+                    if (columns.includes('Results')) {
+                        if (editingRow === i) {
+                            html += `<td><button class='btn btn-sm btn-success' onclick='saveEditRow(${i})'>Save</button> <button class='btn btn-sm btn-secondary' onclick='cancelEditRow()'>Cancel</button></td>`;
+                        } else {
+                            html += `<td><button class='btn btn-sm btn-outline-primary' onclick='editRow(${i})'>Edit</button></td>`;
+                        }
+                    }
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+                html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
+                html += `<span>Page ${page} of ${totalPages}</span>`;
+                html += `<div>`;
+                html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
+                html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
+                html += `</div></div>`;
+                document.getElementById(containerId).innerHTML = html;
+                document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
+                    if (currentPage > 1) {
+                        currentPage--;
+                        renderPage(currentPage);
+                    }
+                };
+                document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        renderPage(currentPage);
+                    }
+                };
+            }
+            window.editRow = function(idx) {
+                editingRow = idx + (currentPage-1)*pageSize;
+                renderPage(currentPage);
+            };
+            window.cancelEditRow = function() {
+                editingRow = null;
+                renderPage(currentPage);
+            };
+            window.saveEditRow = function(idx) {
+                const realIdx = idx + (currentPage-1)*pageSize;
+                const select = document.getElementById(`editResults_${realIdx}`);
+                const value = select.value;
+                fetch('/update_apply_row', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({index: realIdx, column: 'Results', value: value})
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        cachedTables.apply.data[realIdx][columns.indexOf('Results')] = value;
+                        editingRow = null;
+                        renderPage(currentPage);
+                    } else {
+                        alert(data.error);
+                    }
+                });
+            };
+            renderPage(currentPage);
+        }
+        // EMPLOYEE IMPORT FORM HANDLER
+        (function() {
+            const importForm = document.getElementById('employeeImportForm');
+            if(importForm) {
+                importForm.onsubmit = function(e) {
+                    e.preventDefault();
+                    const fileInput = document.getElementById('employeeImportFile');
+                    if (!fileInput.files[0]) return alert('Choose a file.');
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
+                    fetch('/upload_employee_list', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.message);
+                            reloadEmployeeList();
+                        } else {
+                            alert(data.error);
+                        }
+                    });
+                };
+            }
+        })();
+        // Ensure reloadEmployeeList is defined
+        function reloadEmployeeList() {
+            fetch('/employee_list')
+                .then(res => res.text())
+                .then(html => {
+                    document.getElementById('employeeListContent').innerHTML = html;
+                });
+        }
+        // EMPLOYEE ADD FORM HANDLER
+        (function() {
+            const addForm = document.getElementById('addEmployeeForm');
+            if(addForm) {
+                addForm.onsubmit = function(e) {
+                    e.preventDefault();
+                    const name = addForm.elements['Name'].value.trim();
+                    const idNumber = addForm.elements['ID Number'].value.trim();
+                    const dept = addForm.elements['Dept'].value.trim();
+                    if (!name || !idNumber) {
+                        alert('Name and ID Number are required!');
+                        return;
+                    }
+                    fetch('/add_employee', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({Name: name, 'ID Number': idNumber, Dept: dept})
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            reloadEmployeeList();
+                            addForm.reset();
+                        } else {
+                            alert(data.error);
+                        }
+                    });
+                };
+            }
+        })();
+        function removeEmployee(idx) {
+            if (!confirm('Are you sure you want to delete this employee?')) return;
+            fetch('/remove_employee', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: idx})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    reloadEmployeeList();
+                } else {
+                    alert(data.error);
+                }
+            });
+        }
+    </script>
+</body>
+</html> 
