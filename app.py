@@ -175,44 +175,8 @@ def process_ot_lieu_df(df, employee_list_df):
         if 'Name' in cols:
             cols.insert(0, cols.pop(cols.index('Name')))
             df = df[cols]
-
-    # # 2. Xử lý cột Proof about leaders arrange (2) Capture screen call/messages
-    # col_proof = [c for c in df.columns if 'Proof about leaders arrange' in c]
-    # for col in col_proof:
-    #     def process_proof(val):
-    #         s = str(val)
-    #         if s.startswith('Approved OT'):
-    #             # Nếu có hyperlink, giữ nguyên
-    #             if '<a ' in s:
-    #                 # Giữ nguyên hyperlink, chỉ thay text
-    #                 return re.sub(r'>(.*?)<', '>Approved OT<', s)
-    #             return 'Approved OT'
-    #         return val
-    #     df[col] = df[col].apply(process_proof)
-    # # 3. Xử lý cột Capture Screen (3) Check in and check out time
-    # col_capture = [c for c in df.columns if 'Capture Screen' in c and 'check in' in c.lower()]
-    # for col in col_capture:
-    #     def process_capture(val):
-    #         s = str(val)
-    #         if s.startswith('Actual'):
-    #             if '<a ' in s:
-    #                 return re.sub(r'>(.*?)<', '>Actual<', s)
-    #             return 'Actual'
-    #         return val
-    #     df[col] = df[col].apply(process_capture)
-    # # 4. Lọc các dòng OT/Lieu chỉ giữ dòng có giá trị thực
-    # ot_cols = [c for c in df.columns if any(x in c for x in ['OT From', 'Note: 12AM is midnight', 'OT To', 'OT Sum', 'OT Day in week', 'Lieu Date', 'Lieu From', 'Lieu To', 'Lieu Sum'])]
-    # def is_real_value(val):
-    #     s = str(val).strip()
-    #     # Loại bỏ nếu là kiểu giờ phút AM/PM
-    #     if re.match(r'^[0-9]{1,2} ?[:：][0-9]{2} ?[APap][Mm]$', s):
-    #         return False
-    #     if s == '' or s.lower() == 'nan':
-    #         return False
-    #     return True
-    # # Chỉ giữ dòng có ít nhất 1 giá trị thực ở các cột OT/Lieu
-    # mask = df[ot_cols].apply(lambda row: any(is_real_value(v) for v in row), axis=1)
-    # df = df[mask].reset_index(drop=True)
+    # Enrich OT Lieu data with calculated fields and holiday logic
+    df = enrich_ot_lieu_df(df)
     return df
 
 def load_excel_data(file_path, sheet_name=None):
@@ -857,6 +821,23 @@ def get_apply_column_options():
 
 RULES_XLSX_PATH = os.path.join('uploads', 'rules.xlsx')
 
+def get_holidays_from_rules():
+    try:
+        df_rules = pd.read_excel(RULES_XLSX_PATH)
+        if 'Holiday Date in This Year' in df_rules.columns:
+            holidays = []
+            for val in df_rules['Holiday Date in This Year']:
+                if pd.notna(val):
+                    try:
+                        d = pd.to_datetime(val)
+                        holidays.append(d.strftime('%m-%d'))
+                    except:
+                        pass
+            return set(holidays)
+    except Exception as e:
+        print("Error reading holidays from rules.xlsx:", e)
+    return set()
+
 @app.route('/get_rules_table')
 def get_rules_table():
     try:
@@ -920,6 +901,146 @@ def batch_update_rule_cells():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+def enrich_ot_lieu_df(df):
+    # 1. Chuẩn hóa thời gian
+    def change_time_format(time_str):
+        if pd.isna(time_str) or not isinstance(time_str, str):
+            return None
+        s = time_str.replace(" ", "").replace(";", "h").replace(":", "h").replace("Minutes", "00").lower()
+        pm = None
+        if "am" in s:
+            s = s.replace("am", "")
+            pm = "am"
+        elif "pm" in s:
+            s = s.replace("pm", "")
+            pm = "pm"
+        parts = s.split("h")
+        hour = int(parts[0]) if parts[0].isdigit() else 0
+        minute = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        if pm == "pm" and hour < 12:
+            hour += 12
+        if pm == "am" and hour == 12:
+            hour = 0
+        if hour == 24:
+            hour = 0
+        return f"{hour:02d}:{minute:02d}"
+
+    def is_time_format(time_str):
+        if not isinstance(time_str, str):
+            return False
+        return bool(re.match(r"^\\d{2}:\\d{2}$", time_str))
+
+    def time_to_float(time_str):
+        if not is_time_format(time_str):
+            return None
+        h, m = map(int, time_str.split(":"))
+        return h + m/60
+
+    for col in ['OT From Note: 12AM is midnight', 'OT To', 'Lieu From', 'Lieu To']:
+        if col in df.columns:
+            df[col] = df[col].apply(change_time_format)
+
+    # 2. Tính số giờ OT/Lieu
+    def calc_diff_time(from_str, to_str):
+        from_f = time_to_float(from_str)
+        to_f = time_to_float(to_str)
+        if from_f is None or to_f is None:
+            return None
+        diff = to_f - from_f
+        if diff < 0:
+            diff += 24
+        # Trừ nghỉ trưa nếu cần
+        if from_f < 12 and to_f > 13.5:
+            diff -= 1.5
+        return round(diff, 2)
+
+    if 'OT From Note: 12AM is midnight' in df.columns and 'OT To' in df.columns:
+        df['OT_Calc'] = df.apply(lambda row: calc_diff_time(row['OT From Note: 12AM is midnight'], row['OT To']), axis=1)
+    if 'Lieu From' in df.columns and 'Lieu To' in df.columns:
+        df['Lieu_Calc'] = df.apply(lambda row: calc_diff_time(row['Lieu From'], row['Lieu To']), axis=1)
+
+    # 3. Đánh dấu lệch số giờ
+    if 'OT Sum' in df.columns and 'OT_Calc' in df.columns:
+        df['OT_Mismatch'] = abs(df['OT_Calc'] - pd.to_numeric(df['OT Sum'], errors='coerce')) > 0.01
+    if 'Lieu Sum' in df.columns and 'Lieu_Calc' in df.columns:
+        df['Lieu_Mismatch'] = abs(df['Lieu_Calc'] - pd.to_numeric(df['Lieu Sum'], errors='coerce')) > 0.01
+
+    # 4. Phân loại ngày
+    HOLIDAYS = ['01-01', '04-30', '05-01', '09-02', '04-07']
+    def is_holiday(date_str):
+        try:
+            d = pd.to_datetime(date_str)
+            return d.strftime('%m-%d') in HOLIDAYS
+        except:
+            return False
+
+    def get_day_type(date_str):
+        try:
+            d = pd.to_datetime(date_str)
+            if is_holiday(date_str):
+                return 'Holiday'
+            elif d.weekday() >= 5:
+                return 'Weekend'
+            else:
+                return 'Weekday'
+        except:
+            return None
+
+    if 'OT date' in df.columns:
+        df['DayType'] = df['OT date'].apply(get_day_type)
+
+    # 5. Tính OT rates
+    def calc_ot_rates(row):
+        rates = {'Weekday': 0, 'Weekday-Night': 0, 'Weekend': 0, 'Weekend-Night': 0, 'Holiday': 0, 'Holiday-Night': 0}
+        ot_from = time_to_float(row.get('OT From Note: 12AM is midnight'))
+        ot_to = time_to_float(row.get('OT To'))
+        if ot_from is None or ot_to is None:
+            return pd.Series(rates)
+        ot_date = row.get('OT date')
+        day_type = get_day_type(ot_date)
+        if ot_from >= 6 and ot_to <= 22:
+            rates[day_type] = row['OT_Calc']
+        elif ot_from >= 22 or ot_to <= 6:
+            rates[f'{day_type}-Night'] = row['OT_Calc']
+        else:
+            # Ca kéo dài qua đêm, chia nhỏ
+            if ot_from < 22:
+                day_hours = min(ot_to, 22) - ot_from if ot_to > 22 else ot_to - ot_from
+                night_hours = ot_to - 22 if ot_to > 22 else 0
+            else:
+                day_hours = 0
+                night_hours = ot_to - ot_from
+            rates[day_type] = day_hours
+            rates[f'{day_type}-Night'] = night_hours
+        return pd.Series(rates)
+
+    if all(col in df.columns for col in ['OT From Note: 12AM is midnight', 'OT To', 'OT date', 'OT_Calc']):
+        ot_rates = df.apply(calc_ot_rates, axis=1)
+        for col in ot_rates.columns:
+            df[col] = ot_rates[col]
+
+    # 6. Trừ Lieu vào OT theo hệ số
+    def subtract_lieu_from_ot(row):
+        lieu = row['Lieu_Calc'] if not pd.isna(row.get('Lieu_Calc')) else 0
+        ot = {k: row.get(k, 0) for k in ['Weekday', 'Weekday-Night', 'Weekend', 'Weekend-Night', 'Holiday', 'Holiday-Night']}
+        remain = lieu
+        for key, coef in [('Weekday', 1.5), ('Weekday-Night', 2), ('Weekend', 2), ('Weekend-Night', 2.7), ('Holiday', 3), ('Holiday-Night', 3.9)]:
+            if remain > 0 and ot[key] > 0:
+                can_sub = ot[key] * coef
+                if remain >= can_sub:
+                    remain -= can_sub
+                    ot[key] = 0
+                else:
+                    ot[key] -= remain / coef
+                    remain = 0
+        return pd.Series([ot['Weekday'], ot['Weekday-Night'], ot['Weekend'], ot['Weekend-Night'], ot['Holiday'], ot['Holiday-Night'], remain],
+                         index=['Weekday', 'Weekday-Night', 'Weekend', 'Weekend-Night', 'Holiday', 'Holiday-Night', 'Lieu_Remain'])
+
+    if all(col in df.columns for col in ['Weekday', 'Weekday-Night', 'Weekend', 'Weekend-Night', 'Holiday', 'Holiday-Night', 'Lieu_Calc']):
+        df[['Weekday', 'Weekday-Night', 'Weekend', 'Weekend-Night', 'Holiday', 'Holiday-Night', 'Lieu_Remain']] = df.apply(subtract_lieu_from_ot, axis=1)
+
+    return df
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

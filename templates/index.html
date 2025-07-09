@@ -386,6 +386,7 @@
                       </ul>
                     </div>
                 </div>
+                <hr style="margin:1.2em 0 1em 0;">
                 <div class="mb-3">
                     <h4>Special Rules Table</h4>
                     <div id="rulesTableContainer"></div>
@@ -809,7 +810,10 @@
             } else if (type === 'apply') {
                 renderTable('dataTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
             } else if (type === 'otlieu') {
-                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data, ['Name']);
+                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data, [
+                    'Name', 'OT_Calc', 'Lieu_Calc', 'OT_Mismatch', 'Lieu_Mismatch', 'DayType',
+                    'Weekday', 'Weekday-Night', 'Weekend', 'Weekend-Night', 'Holiday', 'Holiday-Night', 'Lieu_Remain'
+                ]);
             }
         }
         // --- Dropdown for Type & Leave Type in Apply Table ---
