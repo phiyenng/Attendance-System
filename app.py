@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, send_file
 from markupsafe import Markup
 import pandas as pd
 import openpyxl
+import calendar
 from datetime import datetime, timedelta, date
 import os
 import json
@@ -34,9 +35,9 @@ if os.path.exists(EMPLOYEE_LIST_PATH):
     try:
         employee_list_df = pd.read_csv(EMPLOYEE_LIST_PATH)
     except Exception:
-        employee_list_df = pd.DataFrame(columns=["STT", "Name", "ID Number", "Dept", "Internship", "14 digits ID"])
+        employee_list_df = pd.DataFrame(columns=["STT", "Name", "ID Number"])
 else:
-    employee_list_df = pd.DataFrame(columns=["STT", "Name", "ID Number", "Dept", "Internship", "14 digits ID"])
+    employee_list_df = pd.DataFrame(columns=["STT", "Name", "ID Number"])
 
 # Helper for header translation
 APPLY_HEADER_MAP = {
@@ -48,7 +49,7 @@ APPLY_HEADER_MAP = {
     '审批结果': 'Approve Result',
 }
 
-# Helper for leave type logic
+# Process "Apply Data"
 def map_leave_type(note):
     if pd.isna(note):
         return ''
@@ -80,9 +81,8 @@ def translate_apply_headers(df):
 def filter_apply_employees(df, emp_list):
     if 'Emp Name' not in df.columns:
         return df
-    emp_list = emp_list.copy()  # Tránh SettingWithCopyWarning
-    emp_list['EmpNameID'] = emp_list['Name'].astype(str) + emp_list['ID Number'].astype(str)
-    valid_names = set(emp_list['EmpNameID'])
+    emp_list = emp_list.copy()
+    valid_names = set(emp_list['Name'].astype(str))
     return df[df['Emp Name'].astype(str).isin(valid_names)]
 
 def add_apply_columns(df):
@@ -96,14 +96,24 @@ def add_apply_columns(df):
                 return 'Trip'
             if 'leave' in val_lower:
                 return 'Leave'
-            #if 'supp' in val_lower:
-                #return 'Supp'
+            if 'supp' in val_lower or 'forgot' in val_lower or 'forget' in val_lower:
+                return 'Supp'
             if 'replenishment' in val_lower:
                 return 'Replenishment'
             return ''
         df['Type'] = df['Application Type'].apply(extract_type)
     else:
         df['Type'] = ''
+    # Bổ sung: Nếu Type vẫn rỗng, kiểm tra Note
+    if 'Note' in df.columns:
+        def fill_type_from_note(row):
+            if row['Type']:
+                return row['Type']
+            note = str(row['Note']).lower()
+            if any(x in note for x in ['supp', 'forgot', 'forget']):
+                return 'Supp'
+            return row['Type']
+        df['Type'] = df.apply(fill_type_from_note, axis=1)
     # Results
     if 'Approve Result' in df.columns:
         def map_approve_result(x):
@@ -120,10 +130,89 @@ def add_apply_columns(df):
     else:
         df['Results'] = ''
     # Leave Type
-    if 'Note' in df.columns:
+    # Ưu tiên lấy từ cột 'Apply Type' nếu có
+    def map_leave_type_applytype(val):
+        if pd.isna(val):
+            return ''
+        val_str = str(val)
+        val_lower = val_str.lower()
+        if 'sick' in val_lower:
+            return 'Sick leave'
+        if 'welfare' in val_lower:
+            return 'Welfare'
+        if 'annual' in val_lower:
+            return 'Annual'
+        if 'leave' in val_lower or 'unpaid' in val_lower:
+            return 'Unpaid'
+        return val_str
+    if 'Application Type' in df.columns:
+        df['Leave Type'] = df['Application Type'].apply(map_leave_type_applytype)
+    elif 'Note' in df.columns:
         df['Leave Type'] = df['Note'].apply(map_leave_type)
     else:
         df['Leave Type'] = ''
+    return df
+
+# Process OT Lieu
+def process_ot_lieu_df(df, employee_list_df):
+    import re
+    # 1. Thêm cột Name dựa vào Title và employee_list_df
+    if 'Title' in df.columns:
+        def extract_name_id(title):
+            match = re.search(r'_([a-zA-Z\s]+?)[_\s](\d{7,8})', str(title))
+            if match:
+                emp_id = match.group(2)
+                # Tìm dòng trong bảng employee_list_df có Name kết thúc bằng emp_id
+                match_row = employee_list_df[employee_list_df['Name'].astype(str).str.endswith(emp_id)]
+                if not match_row.empty:
+                    return match_row.iloc[0]['Name']  # Trả về full name + id từ bảng nhân sự
+            return None  # hoặc return f"{raw_name}{emp_id}" nếu cần fallback
+
+        # Áp dụng cho DataFrame df
+        df['Name'] = df['Title'].apply(extract_name_id)
+        # Đưa cột Name lên đầu
+        cols = list(df.columns)
+        if 'Name' in cols:
+            cols.insert(0, cols.pop(cols.index('Name')))
+            df = df[cols]
+
+    # # 2. Xử lý cột Proof about leaders arrange (2) Capture screen call/messages
+    # col_proof = [c for c in df.columns if 'Proof about leaders arrange' in c]
+    # for col in col_proof:
+    #     def process_proof(val):
+    #         s = str(val)
+    #         if s.startswith('Approved OT'):
+    #             # Nếu có hyperlink, giữ nguyên
+    #             if '<a ' in s:
+    #                 # Giữ nguyên hyperlink, chỉ thay text
+    #                 return re.sub(r'>(.*?)<', '>Approved OT<', s)
+    #             return 'Approved OT'
+    #         return val
+    #     df[col] = df[col].apply(process_proof)
+    # # 3. Xử lý cột Capture Screen (3) Check in and check out time
+    # col_capture = [c for c in df.columns if 'Capture Screen' in c and 'check in' in c.lower()]
+    # for col in col_capture:
+    #     def process_capture(val):
+    #         s = str(val)
+    #         if s.startswith('Actual'):
+    #             if '<a ' in s:
+    #                 return re.sub(r'>(.*?)<', '>Actual<', s)
+    #             return 'Actual'
+    #         return val
+    #     df[col] = df[col].apply(process_capture)
+    # # 4. Lọc các dòng OT/Lieu chỉ giữ dòng có giá trị thực
+    # ot_cols = [c for c in df.columns if any(x in c for x in ['OT From', 'Note: 12AM is midnight', 'OT To', 'OT Sum', 'OT Day in week', 'Lieu Date', 'Lieu From', 'Lieu To', 'Lieu Sum'])]
+    # def is_real_value(val):
+    #     s = str(val).strip()
+    #     # Loại bỏ nếu là kiểu giờ phút AM/PM
+    #     if re.match(r'^[0-9]{1,2} ?[:：][0-9]{2} ?[APap][Mm]$', s):
+    #         return False
+    #     if s == '' or s.lower() == 'nan':
+    #         return False
+    #     return True
+    # # Chỉ giữ dòng có ít nhất 1 giá trị thực ở các cột OT/Lieu
+    # mask = df[ot_cols].apply(lambda row: any(is_real_value(v) for v in row), axis=1)
+    # df = df[mask].reset_index(drop=True)
     return df
 
 def load_excel_data(file_path, sheet_name=None):
@@ -405,25 +494,21 @@ def import_apply():
 
 @app.route('/import/otlieu', methods=['POST'])
 def import_otlieu():
-    """Import OT Lieu data"""
-    global ot_lieu_data
-    
+    global ot_lieu_data, employee_list_df
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
-    
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
     if file and file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
-        
         # Load data
         data = load_excel_data(file_path)
-        
         if data is not None:
+            # Xử lý theo rule
+            data = process_ot_lieu_df(data, employee_list_df)
             ot_lieu_data = data
             return jsonify({
                 'success': True,
@@ -435,11 +520,11 @@ def import_otlieu():
     else:
         return jsonify({'error': 'Invalid file type'}), 400
 
-@app.route('/refresh', methods=['POST'])
-def refresh():
-    """Refresh/Recalculate all data"""
-    result = calculate_attendance()
-    return jsonify(result)
+# @app.route('/refresh', methods=['POST'])
+# def refresh():
+#     """Refresh/Recalculate all data"""
+#     result = calculate_attendance()
+#     return jsonify(result)
 
 @app.route('/calculate_abnormal', methods=['POST'])
 def calculate_abnormal():
@@ -540,17 +625,6 @@ def export():
     except Exception as e:
         return jsonify({'error': f'Failed to export file: {str(e)}'}), 400
 
-@app.route('/get_data_status')
-def get_data_status():
-    """Get status of loaded data"""
-    status = {
-        'sign_in_out': len(sign_in_out_data) if sign_in_out_data is not None else 0,
-        'apply': len(apply_data) if apply_data is not None else 0,
-        'ot_lieu': len(ot_lieu_data) if ot_lieu_data is not None else 0,
-        'abnormal': len(abnormal_data) if abnormal_data is not None else 0
-    }
-    return jsonify(status)
-
 def try_read_csv(file_bytes, **kwargs):
     encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'gbk']
     for enc in encodings:
@@ -626,6 +700,7 @@ def import_with_sheet():
             df = add_apply_columns(df)
             apply_data = df.reset_index(drop=True)
         elif data_type == 'otlieu':
+            df = process_ot_lieu_df(df, employee_list_df)
             ot_lieu_data = df
         else:
             return jsonify({'error': 'Invalid data type'}), 400
@@ -636,7 +711,6 @@ def import_with_sheet():
 
 @app.route('/employee_list', methods=['GET'])
 def employee_list():
-    # Return the employee list as an HTML table with delete buttons
     global employee_list_df
     df = employee_list_df.copy()
     if df.empty:
@@ -666,16 +740,16 @@ def upload_employee_list():
     file_bytes = file.read()
     try:
         if ext in ['.xlsx', '.xls']:
-            # Đọc tất cả các cột là object (chuỗi)
             df = pd.read_excel(BytesIO(file_bytes), dtype=str)
         elif ext == '.csv':
             df = try_read_csv(file_bytes, dtype=str)
         else:
             return jsonify({'error': 'Unsupported file type'}), 400
-        # Only keep required columns
-        keep = ["STT", "Name", "ID Number", "Dept", "Internship", "14 digits ID"]
+        keep = ["STT", "Name", "ID Number"]
         df = df[[col for col in keep if col in df.columns]]
         df = df.fillna('')
+        if "ID Number" in df.columns:
+            df["ID Number"] = df["ID Number"].astype(str)
         employee_list_df = df.reset_index(drop=True)
         # Save to file
         employee_list_df.to_csv(EMPLOYEE_LIST_PATH, index=False)
@@ -694,11 +768,8 @@ def add_employee():
             if col == 'Name':
                 row[idx] = data.get('Name', '')
             elif col == 'ID Number':
-                row[idx] = data.get('ID Number', '')
-            elif col == 'Dept':
-                row[idx] = data.get('Dept', '')
+                row[idx] = str(data.get('ID Number', ''))
         employee_list_df.loc[len(employee_list_df)] = row
-        # Auto fill STT ascending if exists
         if 'STT' in employee_list_df.columns:
             employee_list_df['STT'] = range(1, len(employee_list_df) + 1)
         employee_list_df.to_csv(EMPLOYEE_LIST_PATH, index=False)
@@ -724,54 +795,6 @@ def remove_employee():
 def calculate_prep_data():
     # Placeholder: just return success
     return jsonify({'success': True, 'message': 'Prep data calculation completed (placeholder).'})
-
-@app.route('/ot_lieu_report')
-def ot_lieu_report():
-    # Placeholder: return a simple OT & Lieu Report table
-    html = '''<table class="table table-bordered table-sm">
-        <thead><tr><th>Employee</th><th>OT Hours</th><th>Lieu Hours</th></tr></thead>
-        <tbody>
-            <tr><td>John Doe</td><td>10</td><td>2</td></tr>
-            <tr><td>Jane Smith</td><td>8</td><td>1</td></tr>
-        </tbody>
-    </table>'''
-    return Markup(html)
-
-@app.route('/lieu_followup')
-def lieu_followup():
-    # Placeholder: return a simple Lieu Followup table
-    html = '''<table class="table table-bordered table-sm">
-        <thead><tr><th>Employee</th><th>Remaining Lieu</th></tr></thead>
-        <tbody>
-            <tr><td>John Doe</td><td>1</td></tr>
-            <tr><td>Jane Smith</td><td>0.5</td></tr>
-        </tbody>
-    </table>'''
-    return Markup(html)
-
-@app.route('/total_attendance_detail')
-def total_attendance_detail():
-    # Placeholder: return a simple Total Attendance Detail table
-    html = '''<table class="table table-bordered table-sm">
-        <thead><tr><th>Employee</th><th>Days Present</th><th>Days Absent</th></tr></thead>
-        <tbody>
-            <tr><td>John Doe</td><td>20</td><td>1</td></tr>
-            <tr><td>Jane Smith</td><td>19</td><td>2</td></tr>
-        </tbody>
-    </table>'''
-    return Markup(html)
-
-@app.route('/attendance_report')
-def attendance_report():
-    # Placeholder: return a simple Attendance Report table
-    html = '''<table class="table table-bordered table-sm">
-        <thead><tr><th>Employee</th><th>Date</th><th>Status</th></tr></thead>
-        <tbody>
-            <tr><td>John Doe</td><td>2024-07-01</td><td>Present</td></tr>
-            <tr><td>Jane Smith</td><td>2024-07-01</td><td>Absent</td></tr>
-        </tbody>
-    </table>'''
-    return Markup(html)
 
 @app.route('/get_signinout_data')
 def get_signinout_data():
@@ -815,6 +838,88 @@ def update_apply_row():
             return jsonify({'error': 'Invalid index or column'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+@app.route('/get_apply_column_options')
+def get_apply_column_options():
+    global apply_data
+    default_type = ["Trip", "Leave", "Supp", "Replenishment", ""]
+    default_leave_type = ["Unpaid", "Sick", "Welfare", "Annual", ""]
+    # Lấy các giá trị thực tế trong cột Leave Type
+    leave_type_values = []
+    if apply_data is not None and not apply_data.empty and 'Leave Type' in apply_data.columns:
+        leave_type_values = [v for v in apply_data['Leave Type'].unique() if str(v).strip() != '']
+    # Gộp, loại trùng, giữ nguyên chữ viết
+    leave_type_all = default_leave_type + [v for v in leave_type_values if v not in default_leave_type]
+    return jsonify({
+        "Type": default_type,
+        "Leave Type": leave_type_all
+    })
+
+RULES_XLSX_PATH = os.path.join('uploads', 'rules.xlsx')
+
+@app.route('/get_rules_table')
+def get_rules_table():
+    try:
+        df = pd.read_excel(RULES_XLSX_PATH)
+        df = df.fillna('')
+        columns = list(df.columns)
+        rows = df.astype(str).values.tolist()
+        return jsonify({'columns': columns, 'rows': rows})
+    except Exception as e:
+        return jsonify({'columns': [], 'rows': [], 'error': str(e)})
+
+@app.route('/update_rule_cell', methods=['POST'])
+def update_rule_cell():
+    try:
+        data = request.json
+        row = int(data['row'])
+        col = int(data['col'])
+        value = data['value']
+        df = pd.read_excel(RULES_XLSX_PATH)
+        df.iat[row, col] = value
+        df.to_excel(RULES_XLSX_PATH, index=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/delete_rule_row', methods=['POST'])
+def delete_rule_row():
+    try:
+        data = request.json
+        row = int(data['row'])
+        df = pd.read_excel(RULES_XLSX_PATH)
+        df = df.drop(df.index[row]).reset_index(drop=True)
+        df.to_excel(RULES_XLSX_PATH, index=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/add_rule_row', methods=['POST'])
+def add_rule_row():
+    try:
+        df = pd.read_excel(RULES_XLSX_PATH)
+        new_row = ['' for _ in df.columns]
+        df.loc[len(df)] = new_row
+        df.to_excel(RULES_XLSX_PATH, index=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/batch_update_rule_cells', methods=['POST'])
+def batch_update_rule_cells():
+    try:
+        data = request.json
+        edits = data.get('edits', [])
+        df = pd.read_excel(RULES_XLSX_PATH)
+        for edit in edits:
+            row = int(edit['row'])
+            col = int(edit['col'])
+            value = edit['value']
+            df.iat[row, col] = value
+        df.to_excel(RULES_XLSX_PATH, index=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

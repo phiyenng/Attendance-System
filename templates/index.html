@@ -202,6 +202,7 @@
     <nav class="navbar navbar-light bg-white border-bottom mb-3 px-3" style="border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
         <span class="navbar-brand mb-0 h1" style="font-size:1.2rem;font-weight:bold;">Attendance Report System</span>
         <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-dark btn-sm nav-tab" id="navRules" onclick="showSection('rulesSection')">Rules</button>
             <button class="btn btn-outline-dark btn-sm nav-tab" id="navEmployeeList" onclick="showSection('employeeListSection')">Employee List</button>
             <button class="btn btn-outline-primary btn-sm nav-tab" id="navMain" onclick="showSection('mainSection')">Main</button>
             <button class="btn btn-outline-secondary btn-sm nav-tab" id="navReport" onclick="showSection('reportSection')">Report</button>
@@ -318,6 +319,79 @@
             <!-- Report Section -->
             <div id="reportSection" style="display:none;">
                 <div class="text-muted">Report page coming soon...</div>
+            </div>
+
+            <!-- Rules Section -->
+            <div id="rulesSection" style="display:none;">
+                <div class="mb-3">
+                    <h4>Attendance Rules</h4>
+                    <div style="font-family: 'Segoe UI', 'Roboto', Arial, sans-serif; font-size: 1.08rem; color: #222; line-height: 1.45;">
+                      <div style="font-weight: bold; font-size: 1.13rem; margin-bottom: 0.3em;">
+                        <span style="font-size:1.2em;vertical-align:-2px;">🕰️</span>
+                        Beijing Time, Valid for the Current Day:
+                      </div>
+                      <ul style="margin-bottom: 0.4em; padding-left: 1.2em;">
+                        <li>
+                          <span style="font-weight: 500;">Normal clock-in time (morning):</span>
+                          <span style="color: #1976d2; font-weight: 500;">07:00 – 09:30</span>
+                          <div style="margin-left:1.2em; color:#555; font-size:0.98em; border-left:3px solid #e0e0e0; padding-left:0.7em; margin-top:0.2em;">
+                            Clocking in after <span style="color:#d32f2f;font-weight:500;">13:00</span> is considered <span style="color:#d32f2f;font-weight:500;">morning absence</span>
+                          </div>
+                        </li>
+                        <li style="margin-top:0.5em;">
+                          <span style="font-weight: 500;">Normal clock-out time (evening):</span>
+                          <span style="color: #1976d2; font-weight: 500;">18:30 – 23:59</span>
+                          <div style="margin-left:1.2em; color:#555; font-size:0.98em; border-left:3px solid #e0e0e0; padding-left:0.7em; margin-top:0.2em;">
+                            Clocking out before <span style="color:#d32f2f;font-weight:500;">14:30</span> is considered <span style="color:#d32f2f;font-weight:500;">afternoon absence</span>
+                          </div>
+                        </li>
+                      </ul>
+                      <hr style="margin:1.2em 0 1em 0;">
+                      <div style="font-weight: bold; margin-bottom: 0.2em; color:#d32f2f;">
+                        <span style="font-size:1.1em;vertical-align:-2px;">📌</span>
+                        Status Definitions:
+                      </div>
+                      <ul style="margin-bottom: 0.4em; padding-left: 1.2em;">
+                        <li>
+                          <span style="font-weight: 500;">Late:</span>
+                          <span style="color: #d32f2f;">Clock-in time after 09:30</span>
+                        </li>
+                        <li style="margin-top:0.2em;">
+                          <span style="font-weight: 500;">Early leave:</span>
+                          <span style="color: #d32f2f;">Clock-out time before 18:30</span>
+                        </li>
+                        <li style="margin-top:0.2em;">
+                          <span style="font-weight: 500;">Absent (No attendance):</span>
+                          <span style="color: #d32f2f;">No clock-in or clock-out record for the day</span>
+                        </li>
+                      </ul>
+                      <hr style="margin:1.2em 0 1em 0;">
+                      <div style="font-weight: bold; margin-bottom: 0.2em; color:#1976d2;">
+                        <span style="font-size:1.1em;vertical-align:-2px;">✅</span>
+                        Valid Exceptions <span style="font-weight: normal; color:#222;">(must be applied and approved the same day)</span>
+                      </div>
+                      <ul style="padding-left: 1.2em;">
+                        <li>
+                          <span style="font-weight: 500;">Business trip:</span>
+                          <span>Applied between <span style="color: #1976d2;">09:30 – 18:30</span>, and approved</span>
+                        </li>
+                        <li style="margin-top:0.2em;">
+                          <span style="font-weight: 500;">Leave request:</span>
+                          <span>Applied between <span style="color: #1976d2;">09:30 – 18:30</span>, and approved</span>
+                        </li>
+                        <li style="margin-top:0.2em;">
+                          <span style="font-weight: 500;">Supplementary clocking (manual correction):</span>
+                          <span>Applied between <span style="color: #1976d2;">09:30 – 18:30</span>, and approved</span>
+                        </li>
+                      </ul>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <h4>Special Rules Table</h4>
+                    <div id="rulesTableContainer"></div>
+                    <button class="btn btn-sm btn-success mt-2" onclick="addRuleRow()"><i class="fas fa-plus"></i> Add Rule</button>
+                    <button class="btn btn-sm btn-primary mt-2 ms-2" id="saveRulesBtn" onclick="saveRulesTable()"><i class="fas fa-save"></i> Save Changes</button>
+                </div>
             </div>
         </div>
     </div>
@@ -673,21 +747,25 @@
         // NAVIGATION LOGIC
         function showSection(sectionId) {
             // Hide all
+            document.getElementById('rulesSection').style.display = 'none';
             document.getElementById('employeeListSection').style.display = 'none';
             document.getElementById('mainSection').style.display = 'none';
             document.getElementById('reportSection').style.display = 'none';
             // Remove active from all navs
+            document.getElementById('navRules').classList.remove('active');
             document.getElementById('navEmployeeList').classList.remove('active');
             document.getElementById('navMain').classList.remove('active');
             document.getElementById('navReport').classList.remove('active');
             // Show selected
             document.getElementById(sectionId).style.display = '';
             // Set active nav
+            if(sectionId==='rulesSection') document.getElementById('navRules').classList.add('active');
             if(sectionId==='employeeListSection') document.getElementById('navEmployeeList').classList.add('active');
             if(sectionId==='mainSection') document.getElementById('navMain').classList.add('active');
             if(sectionId==='reportSection') document.getElementById('navReport').classList.add('active');
             // Special: reload employee list if needed
             if(sectionId==='employeeListSection') reloadEmployeeList();
+            if(sectionId==='rulesSection') loadRulesTable();
         }
         // Default to Main
         showSection('mainSection');
@@ -731,9 +809,12 @@
             } else if (type === 'apply') {
                 renderTable('dataTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
             } else if (type === 'otlieu') {
-                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data, ['Name']);
             }
         }
+        // --- Dropdown for Type & Leave Type in Apply Table ---
+        let applyColumnOptions = {};
+        fetch('/get_apply_column_options').then(res => res.json()).then(data => { applyColumnOptions = data; });
         // Enhanced renderTable: highlight new columns if provided
         function renderTable(containerId, columns, rows, highlightCols=[]) {
             const pageSize = 50;
@@ -754,12 +835,20 @@
                 const start = (page - 1) * pageSize;
                 const end = Math.min(start + pageSize, rows.length);
                 for (let i = start; i < end; i++) {
+                    const realIdx = i; // realIdx là index thực tế trong toàn bảng
                     html += '<tr>';
                     let row = rows[i];
                     for (let j = 0; j < columns.length; j++) {
                         const col = columns[j];
-                        if (editingRow === i && col === 'Results') {
-                            html += `<td><select id="editResults_${i}" class="form-select form-select-sm">
+                        if (editingRow === realIdx && (col === 'Type' || col === 'Leave Type')) {
+                            const opts = (applyColumnOptions[col] || []);
+                            html += `<td><select id="edit_${col.replace(/ /g,'_')}_${realIdx}" class="form-select form-select-sm">`;
+                            opts.forEach(opt => {
+                                html += `<option value="${opt}" ${row[j]===opt?'selected':''}>${opt}</option>`;
+                            });
+                            html += `</select></td>`;
+                        } else if (editingRow === realIdx && col === 'Results') {
+                            html += `<td><select id="editResults_${realIdx}" class="form-select form-select-sm">
                                 <option value="Approved" ${row[j]==='Approved'?'selected':''}>Approved</option>
                                 <option value="Pending" ${row[j]==='Pending'?'selected':''}>Pending</option>
                                 <option value="Reject" ${row[j]==='Reject'?'selected':''}>Reject</option>
@@ -769,10 +858,10 @@
                         }
                     }
                     if (columns.includes('Results')) {
-                        if (editingRow === i) {
-                            html += `<td><button class='btn btn-sm btn-success' onclick='saveEditRow(${i})'>Save</button> <button class='btn btn-sm btn-secondary' onclick='cancelEditRow()'>Cancel</button></td>`;
+                        if (editingRow === realIdx) {
+                            html += `<td><button class='btn btn-sm btn-success' onclick='saveEditRow(${realIdx})'>Save</button> <button class='btn btn-sm btn-secondary' onclick='cancelEditRow()'>Cancel</button></td>`;
                         } else {
-                            html += `<td><button class='btn btn-sm btn-outline-primary' onclick='editRow(${i})'>Edit</button></td>`;
+                            html += `<td><button class='btn btn-sm btn-outline-primary' onclick='editRow(${realIdx})'>Edit</button></td>`;
                         }
                     }
                     html += '</tr>';
@@ -799,30 +888,42 @@
                 };
             }
             window.editRow = function(idx) {
-                editingRow = idx + (currentPage-1)*pageSize;
-                renderPage(currentPage);
+                editingRow = idx;
+                renderPage(Math.floor(idx / pageSize) + 1);
             };
             window.cancelEditRow = function() {
                 editingRow = null;
                 renderPage(currentPage);
             };
             window.saveEditRow = function(idx) {
-                const realIdx = idx + (currentPage-1)*pageSize;
-                const select = document.getElementById(`editResults_${realIdx}`);
-                const value = select.value;
-                fetch('/update_apply_row', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({index: realIdx, column: 'Results', value: value})
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        cachedTables.apply.data[realIdx][columns.indexOf('Results')] = value;
+                const updates = {};
+                if (document.getElementById(`edit_Type_${idx}`)) {
+                    updates['Type'] = document.getElementById(`edit_Type_${idx}`).value;
+                }
+                if (document.getElementById(`edit_Leave_Type_${idx}`)) {
+                    updates['Leave Type'] = document.getElementById(`edit_Leave_Type_${idx}`).value;
+                }
+                if (document.getElementById(`editResults_${idx}`)) {
+                    updates['Results'] = document.getElementById(`editResults_${idx}`).value;
+                }
+                // Gửi từng update
+                const updatePromises = Object.entries(updates).map(([col, value]) =>
+                    fetch('/update_apply_row', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({index: idx, column: col, value: value})
+                    }).then(res => res.json())
+                );
+                Promise.all(updatePromises).then(results => {
+                    let ok = results.every(r => r.success);
+                    if (ok) {
+                        if ('Type' in updates) rows[idx][columns.indexOf('Type')] = updates['Type'];
+                        if ('Leave Type' in updates) rows[idx][columns.indexOf('Leave Type')] = updates['Leave Type'];
+                        if ('Results' in updates) rows[idx][columns.indexOf('Results')] = updates['Results'];
                         editingRow = null;
-                        renderPage(currentPage);
+                        renderPage(Math.floor(idx / pageSize) + 1);
                     } else {
-                        alert(data.error);
+                        alert('Update failed!');
                     }
                 });
             };
@@ -907,6 +1008,87 @@
                     alert(data.error);
                 }
             });
+        }
+
+        // RULES TABLE LOGIC
+        let rulesTableData = {columns: [], rows: []};
+        let rulesTableEdits = {};
+        function loadRulesTable() {
+            fetch('/get_rules_table')
+                .then(res => res.json())
+                .then(data => {
+                    rulesTableData = data;
+                    rulesTableEdits = {};
+                    renderRulesTable(data.columns, data.rows);
+                });
+        }
+
+        function renderRulesTable(columns, rows) {
+            let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
+            columns.forEach(col => {
+                html += `<th>${col}</th>`;
+            });
+            html += '<th>Action</th></tr></thead><tbody>';
+            rows.forEach((row, idx) => {
+                html += '<tr>';
+                row.forEach((cell, j) => {
+                    if (columns[j].toLowerCase().includes('date')) {
+                        html += `<td><input type="date" class="form-control form-control-sm" value="${cell}" onchange="trackRuleEdit(${idx},${j},this.value)"></td>`;
+                    } else {
+                        html += `<td contenteditable="true" oninput="trackRuleEdit(${idx},${j},this.innerText)">${cell}</td>`;
+                    }
+                });
+                html += `<td><button class='btn btn-sm btn-danger' onclick='deleteRuleRow(${idx})'>Delete</button></td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+            document.getElementById('rulesTableContainer').innerHTML = html;
+        }
+
+        function trackRuleEdit(rowIdx, colIdx, value) {
+            if (!rulesTableEdits[rowIdx]) rulesTableEdits[rowIdx] = {};
+            rulesTableEdits[rowIdx][colIdx] = value;
+        }
+
+        function saveRulesTable() {
+            // Gather all edits and send in one request
+            const edits = [];
+            for (const row in rulesTableEdits) {
+                for (const col in rulesTableEdits[row]) {
+                    edits.push({row: parseInt(row), col: parseInt(col), value: rulesTableEdits[row][col]});
+                }
+            }
+            if (edits.length === 0) {
+                showAlert('warning', 'No changes to save.');
+                return;
+            }
+            fetch('/batch_update_rule_cells', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({edits: edits})
+            }).then(res => res.json()).then(data => {
+                if (data.success) {
+                    showAlert('success', 'Rules saved successfully!');
+                    loadRulesTable();
+                } else {
+                    showAlert('danger', 'Save failed: ' + (data.error || ''));
+                }
+            });
+        }
+        function deleteRuleRow(idx) {
+            fetch('/delete_rule_row', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({row: idx})
+            }).then(res => res.json()).then(data => {
+                if (data.success) loadRulesTable();
+                else alert('Delete failed!');
+            });
+        }
+        function addRuleRow() {
+            fetch('/add_rule_row', {method: 'POST'})
+                .then(res => res.json())
+                .then(data => { if (data.success) loadRulesTable(); else alert('Add failed!'); });
         }
     </script>
 </body>
