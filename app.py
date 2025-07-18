@@ -79,72 +79,6 @@ APPLY_HEADER_MAP = {
     '审批结果': 'Approve Result',
 }
 
-# =====================
-# TIME VALIDATION UTILS
-# =====================
-# def validate_time_data(value, allow_date=True, allow_future=False, only_time=False):
-#     """
-#     Kiểm tra và chuẩn hóa dữ liệu thời gian.
-#     - value: chuỗi hoặc datetime
-#     - allow_date: cho phép có ngày (True) hay chỉ giờ phút (False)
-#     - allow_future: cho phép ngày trong tương lai không
-#     - only_time: chỉ lấy giờ phút (hh:mm)
-#     Trả về: (is_valid, normalized_value, error_message)
-#     """
-#     if pd.isna(value) or value == '':
-#         return False, None, 'Empty value'
-    
-#     try:
-#         if only_time:
-#             return _normalize_time_string(value)
-#         dt = pd.to_datetime(value, errors='coerce')
-#         if pd.isna(dt):
-#             return False, None, 'Invalid datetime format'
-#         if not allow_future and dt > pd.Timestamp.now(): # Future time
-#             return False, None, 'Date/time is in the future'
-#         if allow_date:
-#             return True, dt.strftime('%Y-%m-%d %H:%M'), ''
-#         else:
-#             return True, dt.strftime('%H:%M'), ''
-#     except Exception as e:
-#         return False, None, f'Error: {e}'
-
-# def _normalize_time_string(time_str):
-#     if not isinstance(time_str, str):
-#         return False, None, 'Not a string'
-#     s = time_str.strip().lower()
-#     s = s.replace(';', ':').replace('；', ':').replace('：', ':').replace('h', ':')
-#     s = re.sub(r'\s+', '', s)
-#     if not re.search(r'\d', s):
-#         return False, None, 'Invalid time format'
-#     # AM/PM
-#     ampm = None
-#     if 'am' in s:
-#         ampm = 'AM'
-#         s = s.replace('am', '')
-#     elif 'pm' in s:
-#         ampm = 'PM'
-#         s = s.replace('pm', '')
-#     # Split numbers
-#     m = re.match(r'^(\d{1,2})([:.](\d{1,2}))?$', s)
-#     if not m:
-#         return False, None, 'Invalid time format'
-#     hour = int(m.group(1))
-#     minute = int(m.group(3)) if m.group(3) else 0
-#     # AM/PM
-#     if ampm == 'AM':
-#         if hour == 12:
-#             hour = 0
-#     elif ampm == 'PM':
-#         if hour < 12:
-#             hour += 12
-#     # Check valid
-#     if hour < 0 or hour > 23:
-#         return False, None, 'Hour out of range (0-23)'
-#     if minute < 0 or minute > 59:
-#         return False, None, 'Minute out of range (0-59)'
-#     return True, f"{hour:02d}:{minute:02d}", ''
-
 # =======================
 # APPLY DATA
 # =======================
@@ -326,16 +260,15 @@ def process_ot_lieu_df(df, employee_list_df):
             return {'value': val, 'warning': True}
         return val
 
-    # Helper: parse time to 24h format (returns 'HH:MM' or None if cannot parse)
     def parse_time_to_24h(val):
         if pd.isna(val) or not str(val).strip():
             return ''
         
         s = str(val).strip()
-        # Nếu là 'Hour : Minutes AM', 'Hour : Minutes PM', hoặc 'Hour : Minutes AM/PM' (bất kể hoa thường, khoảng trắng)
-        #s_no_space = re.sub(r'\s+', '', s).lower()
-        if s in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
-            return ''
+        # # Nếu là 'Hour : Minutes AM', 'Hour : Minutes PM', hoặc 'Hour : Minutes AM/PM' (bất kể hoa thường, khoảng trắng)
+        # #s_no_space = re.sub(r'\s+', '', s).lower()
+        # if s in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
+        #     return ''
         
         # 1. Dạng 12h AM/PM
         m = re.match(r'^(0?[1-9]|1[0-2])\s*[:. ]\s*([0-5][0-9])\s*(AM|PM|am|pm)$', s)
@@ -358,6 +291,9 @@ def process_ot_lieu_df(df, employee_list_df):
 
 # ---- OT From/To & Lieu From/To change format HH:MM ----
     def norm_time_to_24h(val):
+        # Bỏ qua các giá trị đặc biệt
+        if str(val).strip() in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
+            return val
         parsed = parse_time_to_24h(val)
         if parsed is not None and parsed != '':
             return parsed
@@ -410,30 +346,93 @@ def process_ot_lieu_df(df, employee_list_df):
             ot_from = row[ot_from_cols[0]] if not isinstance(row[ot_from_cols[0]], dict) else row[ot_from_cols[0]].get('value')
             ot_to = row[ot_to_cols[0]] if not isinstance(row[ot_to_cols[0]], dict) else row[ot_to_cols[0]].get('value')
             user_val = row[sum_ot_col] if not isinstance(row[sum_ot_col], dict) else row[sum_ot_col].get('value')
-            if is_time_ampm(ot_from) and is_time_ampm(ot_to):
-                real = calc_hours_ampm(ot_from, ot_to)
+            # Nếu cả 2 thời gian hợp lệ HH:MM
+            if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_to)):
+                t1 = datetime.strptime(str(ot_from), '%H:%M')
+                t2 = datetime.strptime(str(ot_to), '%H:%M')
+                diff = (t2 - t1).total_seconds() / 3600
+                if diff < 0:
+                    diff += 24
+                # Trừ 1.5h nếu xuyên trưa
+                if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
+                    if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
+                        diff -= 1.5
+                real = round(diff, 2)
                 try:
                     user_val_f = float(user_val)
                 except:
                     user_val_f = None
-                if real is not None and user_val_f is not None and abs(real - user_val_f) > 0.01:
+                if user_val_f is None or abs(real - user_val_f) > 0.01:
                     df.at[idx, sum_ot_col] = mark_cell(user_val, error=True, suggest=real)
-            # else: do not mark error if time is not valid, already marked as warning
-
+                else:
+                    df.at[idx, sum_ot_col] = real
     # Lieu
     if lieu_from_cols and lieu_to_cols and sum_lieu_col:
         for idx, row in df.iterrows():
             lieu_from = row[lieu_from_cols[0]] if not isinstance(row[lieu_from_cols[0]], dict) else row[lieu_from_cols[0]].get('value')
             lieu_to = row[lieu_to_cols[0]] if not isinstance(row[lieu_to_cols[0]], dict) else row[lieu_to_cols[0]].get('value')
             user_val = row[sum_lieu_col] if not isinstance(row[sum_lieu_col], dict) else row[sum_lieu_col].get('value')
-            if is_time_ampm(lieu_from) and is_time_ampm(lieu_to):
-                real = calc_hours_ampm(lieu_from, lieu_to)
+            if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_to)):
+                t1 = datetime.strptime(str(lieu_from), '%H:%M')
+                t2 = datetime.strptime(str(lieu_to), '%H:%M')
+                diff = (t2 - t1).total_seconds() / 3600
+                if diff < 0:
+                    diff += 24
+                # Trừ 1.5h nếu xuyên trưa
+                if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
+                    if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
+                        diff -= 1.5
+                real = round(diff, 2)
                 try:
                     user_val_f = float(user_val)
                 except:
                     user_val_f = None
-                if real is not None and user_val_f is not None and abs(real - user_val_f) > 0.01:
+                if user_val_f is None or abs(real - user_val_f) > 0.01:
                     df.at[idx, sum_lieu_col] = mark_cell(user_val, error=True, suggest=real)
+                else:
+                    df.at[idx, sum_lieu_col] = real
+
+    special_vals = ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']
+    def is_empty_or_special(val):
+        return pd.isna(val) or str(val).strip() == '' or str(val).strip() in special_vals
+    if ot_from_cols and ot_to_cols and lieu_from_cols and lieu_to_cols:
+        df = df[~(
+            df[ot_from_cols[0]].apply(is_empty_or_special) &
+            df[ot_to_cols[0]].apply(is_empty_or_special) &
+            df[lieu_from_cols[0]].apply(is_empty_or_special) &
+            df[lieu_to_cols[0]].apply(is_empty_or_special)
+        )].reset_index(drop=True)
+
+    def mark_gray(val):
+        return {'value': val, 'gray': True}
+    
+    ot_day_col = next((c for c in df.columns if re.search(r'ot.*day', c, re.I)), None)
+    lieu_date_col = next((c for c in df.columns if re.search(r'lieu.*date', c, re.I)), None)
+
+    # OT From/To
+    if ot_from_cols and ot_to_cols:
+        for idx, row in df.iterrows():
+            ot_from = row[ot_from_cols[0]]
+            ot_to = row[ot_to_cols[0]]
+            if is_empty_or_special(ot_from) and is_empty_or_special(ot_to):
+                df.at[idx, ot_from_cols[0]] = mark_gray(ot_from)
+                df.at[idx, ot_to_cols[0]] = mark_gray(ot_to)
+                if sum_ot_col:
+                    df.at[idx, sum_ot_col] = mark_gray(row[sum_ot_col])
+                if ot_day_col:
+                    df.at[idx, ot_day_col] = mark_gray(row[ot_day_col])
+    # Lieu From/To
+    if lieu_from_cols and lieu_to_cols:
+        for idx, row in df.iterrows():
+            lieu_from = row[lieu_from_cols[0]]
+            lieu_to = row[lieu_to_cols[0]]
+            if is_empty_or_special(lieu_from) and is_empty_or_special(lieu_to):
+                df.at[idx, lieu_from_cols[0]] = mark_gray(lieu_from)
+                df.at[idx, lieu_to_cols[0]] = mark_gray(lieu_to)
+                if sum_lieu_col:
+                    df.at[idx, sum_lieu_col] = mark_gray(row[sum_lieu_col])
+                if lieu_date_col:
+                    df.at[idx, lieu_date_col] = mark_gray(row[lieu_date_col])
     return df
 
 # def is_holiday(check_date):
@@ -527,14 +526,17 @@ def import_signinout():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
+
         # Load data
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
+
             # For .xls, explicitly set engine if needed
             df = pd.read_excel(file_path, engine='xlrd')
         else:
             df = pd.read_excel(file_path)
+
         # Only keep emp_name and attendance_time
         keep = [col for col in df.columns if col.lower() in ['emp_name', 'attendance_time']]
         df = df[keep]
@@ -592,13 +594,13 @@ def import_otlieu():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
+
         # Load data
         data = load_excel_data(file_path)
         if data is not None:
-            # # Nếu có cột tên đúng 'OT From Note: 12AM is midnight', đổi thành 'OT From'
-            # if 'OT From Note: 12AM is midnight' in data.columns:
-            #     data = data.rename(columns={'OT From Note: 12AM is midnight': 'OT From'})
-
+            # Nếu có cột tên đúng 'OT From Note: 12AM is midnight', đổi thành 'OT From'
+            if 'OT From Note: 12AM is midnight' in data.columns:
+                data = data.rename(columns={'OT From Note: 12AM is midnight': 'OT From'})
             # Xử lý theo rule
             data = process_ot_lieu_df(data, employee_list_df)
             ot_lieu_data = data
@@ -786,6 +788,8 @@ def import_with_sheet():
             df = add_apply_columns(df)
             apply_data = df.reset_index(drop=True)
         elif data_type == 'otlieu':
+            if 'OT From Note: 12AM is midnight' in df.columns:
+                df = df.rename(columns={'OT From Note: 12AM is midnight': 'OT From'})
             df = process_ot_lieu_df(df, employee_list_df)
             ot_lieu_data = df
         else:
@@ -941,9 +945,68 @@ def update_otlieu_row():
         idx = int(data.get('index'))
         col = data.get('column')
         value = data.get('value')
+        # Xóa debug log
         if ot_lieu_data is not None and 0 <= idx < len(ot_lieu_data) and col in ot_lieu_data.columns:
             ot_lieu_data.at[idx, col] = value
-            return jsonify({'success': True})
+            # Nếu user sửa OT From/To hoặc Lieu From/To thì tính lại sum và trả về giá trị mới
+            updated = {}
+            ot_from_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*from', c, re.I)]
+            ot_to_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*to', c, re.I)]
+            sum_ot_col = next((c for c in ot_lieu_data.columns if re.search(r'ot.*sum', c, re.I)), None)
+            lieu_from_cols = [c for c in ot_lieu_data.columns if re.search(r'lieu.*from', c, re.I)]
+            lieu_to_cols = [c for c in ot_lieu_data.columns if re.search(r'lieu.*to', c, re.I)]
+            sum_lieu_col = next((c for c in ot_lieu_data.columns if re.search(r'lieu.*sum', c, re.I)), None)
+            # OT
+            if col in ot_from_cols + ot_to_cols and sum_ot_col:
+                ot_from = ot_lieu_data.at[idx, ot_from_cols[0]] if not isinstance(ot_lieu_data.at[idx, ot_from_cols[0]], dict) else ot_lieu_data.at[idx, ot_from_cols[0]].get('value')
+                ot_to = ot_lieu_data.at[idx, ot_to_cols[0]] if not isinstance(ot_lieu_data.at[idx, ot_to_cols[0]], dict) else ot_lieu_data.at[idx, ot_to_cols[0]].get('value')
+                if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_to)):
+                    t1 = datetime.strptime(str(ot_from), '%H:%M')
+                    t2 = datetime.strptime(str(ot_to), '%H:%M')
+                    diff = (t2 - t1).total_seconds() / 3600
+                    if diff < 0:
+                        diff += 24
+                    if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
+                        if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
+                            diff -= 1.5
+                    real = round(diff, 2)
+                    user_val = ot_lieu_data.at[idx, sum_ot_col] if not isinstance(ot_lieu_data.at[idx, sum_ot_col], dict) else ot_lieu_data.at[idx, sum_ot_col].get('value')
+                    try:
+                        user_val_f = float(user_val)
+                    except:
+                        user_val_f = None
+                    if user_val_f is None or abs(real - user_val_f) > 0.01:
+                        ot_lieu_data.at[idx, sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
+                        updated[sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
+                    else:
+                        ot_lieu_data.at[idx, sum_ot_col] = real
+                        updated[sum_ot_col] = real
+            # Lieu
+            if col in lieu_from_cols + lieu_to_cols and sum_lieu_col:
+                lieu_from = ot_lieu_data.at[idx, lieu_from_cols[0]] if not isinstance(ot_lieu_data.at[idx, lieu_from_cols[0]], dict) else ot_lieu_data.at[idx, lieu_from_cols[0]].get('value')
+                lieu_to = ot_lieu_data.at[idx, lieu_to_cols[0]] if not isinstance(ot_lieu_data.at[idx, lieu_to_cols[0]], dict) else ot_lieu_data.at[idx, lieu_to_cols[0]].get('value')
+                if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_to)):
+                    t1 = datetime.strptime(str(lieu_from), '%H:%M')
+                    t2 = datetime.strptime(str(lieu_to), '%H:%M')
+                    diff = (t2 - t1).total_seconds() / 3600
+                    if diff < 0:
+                        diff += 24
+                    if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
+                        if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
+                            diff -= 1.5
+                    real = round(diff, 2)
+                    user_val = ot_lieu_data.at[idx, sum_lieu_col] if not isinstance(ot_lieu_data.at[idx, sum_lieu_col], dict) else ot_lieu_data.at[idx, sum_lieu_col].get('value')
+                    try:
+                        user_val_f = float(user_val)
+                    except:
+                        user_val_f = None
+                    if user_val_f is None or abs(real - user_val_f) > 0.01:
+                        ot_lieu_data.at[idx, sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
+                        updated[sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
+                    else:
+                        ot_lieu_data.at[idx, sum_lieu_col] = real
+                        updated[sum_lieu_col] = real
+            return jsonify({'success': True, 'updated': updated})
         else:
             return jsonify({'error': 'Invalid index or column'}), 400
     except Exception as e:

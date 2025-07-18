@@ -567,6 +567,24 @@
       </div>
     </div>
 
+    <!-- OT Lieu Validation Modal -->
+    <div class="modal fade" id="otlieuValidationModal" tabindex="-1" aria-labelledby="otlieuValidationModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="otlieuValidationModalLabel">Data Error!</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="otlieuValidationModalBody">
+            <!-- Message will be injected here -->
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let pendingFile = null;
@@ -964,6 +982,9 @@
         // --- Dropdown for Type & Leave Type in Apply Table ---
         let applyColumnOptions = {};
         fetch('/get_apply_column_options').then(res => res.json()).then(data => { applyColumnOptions = data; });
+        // --- Scroll position persistence ---
+        let lastScrollTop = 0;
+        let lastScrollLeft = 0;
         // Enhanced renderTable: highlight new columns if provided
         function renderTable(containerId, columns, rows, highlightCols=[]) {
             const pageSize = 50;
@@ -972,9 +993,11 @@
             let editingRow = null;
             function renderPage(page) {
                 const container = document.getElementById(containerId);
-                // Save scroll position (vertical and horizontal)
-                const scrollTop = container ? container.scrollTop : 0;
-                const scrollLeft = container ? container.scrollLeft : 0;
+                // Restore scroll position if available
+                setTimeout(function() {
+                    container.scrollTop = lastScrollTop;
+                    container.scrollLeft = lastScrollLeft;
+                }, 0);
 
                 let html = '<div class="table-responsive"><table class="table table-bordered"><thead>';
                 html += '<tr>';
@@ -1015,7 +1038,7 @@
                             html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
                             html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;">`;
                             if (cell.suggest !== undefined && cell.suggest !== null) {
-                                html += `<div style="font-size:0.7em;color:#888;">Gợi ý: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
+                                html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
                             }
                             html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)"><i class='fas fa-check'></i></button>`;
                             html += '</td>';
@@ -1026,6 +1049,9 @@
                             html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)" title="Lưu chỉnh sửa"><i class='fas fa-check'></i></button>`;
                             html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
                             html += '</td>';
+                        } else if (cell && typeof cell === 'object' && cell.gray) {
+                            // --- GRAY CELL LOGIC ---
+                            html += `<td class="${tdClass}" style="background:#f2f2f2;color:#888;">${displayValue}</td>`;
                         } else if (columns.includes('Results') && editingRow === realIdx) {
                             // Nếu là dòng đang edit trong bảng Apply
                             if (col === 'Type') {
@@ -1071,20 +1097,20 @@
                 html += `</div></div>`;
                 container.innerHTML = html;
 
-                // Restore scroll position
-                container.scrollTop = scrollTop;
-                container.scrollLeft = scrollLeft;
+                // Save scroll position on scroll
+                container.onscroll = function() {
+                    lastScrollTop = container.scrollTop;
+                    lastScrollLeft = container.scrollLeft;
+                };
 
                 document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
                     if (currentPage > 1) {
-                        currentPage--;
-                        renderPage(currentPage);
+                        renderPage(currentPage - 1);
                     }
                 };
                 document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
                     if (currentPage < totalPages) {
-                        currentPage++;
-                        renderPage(currentPage);
+                        renderPage(currentPage + 1);
                     }
                 };
             }
@@ -1116,16 +1142,46 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        // Reload lại bảng
+                        // Chỉ update lại cell/dòng vừa chỉnh sửa, không render lại toàn bảng
+                        // Cập nhật cache
                         if (type === 'apply') {
-                            fetch('/get_apply_data').then(res=>res.json()).then(d=>{
-                                cachedTables.apply = d;
-                                renderSelectedTable();
-                            });
+                            cachedTables.apply.data[rowIdx][colIdx] = newValue;
                         } else {
-                            fetch('/get_otlieu_data').then(res=>res.json()).then(d=>{
-                                cachedTables.otlieu = d;
-                                renderSelectedTable();
+                            cachedTables.otlieu.data[rowIdx][colIdx] = newValue;
+                        }
+                        // Update DOM cell
+                        const allRows = table.querySelectorAll('tbody tr');
+                        if (allRows[rowIdx]) {
+                            const tds = allRows[rowIdx].querySelectorAll('td');
+                            if (tds[colIdx]) {
+                                let cell = (type === 'apply' ? cachedTables.apply.data[rowIdx][colIdx] : cachedTables.otlieu.data[rowIdx][colIdx]);
+                                let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
+                                if (cell && typeof cell === 'object' && cell.error) {
+                                    tds[colIdx].outerHTML = `<td style="background:#ffeaea;position:relative;"><input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;"><div style=\"font-size:0.7em;color:#888;\">Correct value: <span style=\"color:#1976d2;font-weight:bold;\">${cell.suggest ?? ''}</span></div><button class=\"btn btn-sm btn-success\" style=\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\" onclick=\"saveErrorCell('${containerId}',${rowIdx},${colIdx},this)\"><i class='fas fa-check'></i></button></td>`;
+                                } else if (cell && typeof cell === 'object' && cell.warning) {
+                                    tds[colIdx].outerHTML = `<td style="background:#fffbe6;position:relative;"><input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;"><button class=\"btn btn-sm btn-success\" style=\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\" onclick=\"saveErrorCell('${containerId}',${rowIdx},${colIdx},this)\" title=\"Lưu chỉnh sửa\"><i class='fas fa-check'></i></button><div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div></td>`;
+                                } else if (cell && typeof cell === 'object' && cell.gray) {
+                                    tds[colIdx].outerHTML = `<td style="background:#f2f2f2;color:#888;">${displayValue}</td>`;
+                                } else {
+                                    tds[colIdx].outerHTML = `<td>${displayValue}</td>`;
+                                }
+                            }
+                        }
+                        // Nếu backend trả về updated (sum), update luôn cell sum
+                        if (type === 'otlieu' && data.updated) {
+                            Object.entries(data.updated).forEach(([sumCol, sumVal]) => {
+                                const sumIdx = columns.indexOf(sumCol);
+                                if (sumIdx !== -1 && allRows[rowIdx]) {
+                                    cachedTables.otlieu.data[rowIdx][sumIdx] = sumVal;
+                                    const tds = allRows[rowIdx].querySelectorAll('td');
+                                    let cell = sumVal;
+                                    let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
+                                    if (cell && typeof cell === 'object' && cell.error) {
+                                        tds[sumIdx].outerHTML = `<td style=\"background:#ffeaea;position:relative;\"><input type=\"text\" class=\"form-control form-control-sm\" value=\"${displayValue}\" style=\"border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;\"><div style=\\"font-size:0.7em;color:#888;\\">Correct value: <span style=\\"color:#1976d2;font-weight:bold;\\">${cell.suggest ?? ''}</span></div><button class=\\"btn btn-sm btn-success\\" style=\\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\\" onclick=\\"saveErrorCell('${containerId}',${rowIdx},${sumIdx},this)\"><i class='fas fa-check'></i></button></td>`;
+                                    } else {
+                                        tds[sumIdx].outerHTML = `<td>${displayValue}</td>`;
+                                    }
+                                }
                             });
                         }
                     } else {
@@ -1134,10 +1190,18 @@
                 });
             };
             window.editRow = function(idx) {
+                // Save scroll position before re-render
+                const container = document.getElementById(containerId);
+                lastScrollTop = container.scrollTop;
+                lastScrollLeft = container.scrollLeft;
                 editingRow = idx;
                 renderPage(Math.floor(idx / pageSize) + 1);
             };
             window.cancelEditRow = function() {
+                // Save scroll position before re-render
+                const container = document.getElementById(containerId);
+                lastScrollTop = container.scrollTop;
+                lastScrollLeft = container.scrollLeft;
                 editingRow = null;
                 renderPage(currentPage);
             };
@@ -1443,7 +1507,40 @@
 
         // Thêm hàm chuyển sang trang report khi nhấn nút Report
         function goToReport() {
-            showSection('reportSection');
+            // Check OT Lieu data for error/warning cells
+            const otlieu = cachedTables.otlieu && cachedTables.otlieu.data ? cachedTables.otlieu.data : [];
+            let hasError = false, hasWarning = false;
+            for (let i = 0; i < otlieu.length; i++) {
+                for (let j = 0; j < otlieu[i].length; j++) {
+                    const cell = otlieu[i][j];
+                    if (cell && typeof cell === 'object') {
+                        if (cell.error) hasError = true;
+                        if (cell.warning) hasWarning = true;
+                    }
+                }
+            }
+            if (hasError || hasWarning) {
+                let msg = 'Please resolve all highlighted cells in OT Lieu data before proceeding to the report.<br>';
+                if (hasError) msg += '- <b>Red cells</b>: Invalid or inconsistent values.<br>';
+                if (hasWarning) msg += '- <b>Yellow cells</b>: Invalid or missing time format (should be HH:MM).';
+                document.getElementById('otlieuValidationModalBody').innerHTML = msg;
+                var otlieuModal = new bootstrap.Modal(document.getElementById('otlieuValidationModal'));
+                otlieuModal.show();
+                return;
+            }
+            // Optionally: save/export data before switching tab (call /export to save)
+            showLoading(true);
+            fetch('/export')
+                .then(response => {
+                    showLoading(false);
+                    if (!response.ok) throw new Error('Failed to save data before report');
+                    // Switch to report tab
+                    showSection('reportSection');
+                })
+                .catch(() => {
+                    showLoading(false);
+                    showAlert('danger', 'Failed to save data before report.');
+                });
         }
     </script>
 </body>
