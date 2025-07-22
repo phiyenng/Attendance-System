@@ -617,7 +617,18 @@ def import_otlieu():
 @app.route('/calculate_abnormal', methods=['POST'])
 def calculate_abnormal():
     """Calculate abnormal attendance"""
-    global abnormal_data
+    global abnormal_data, sign_in_out_data, apply_data, ot_lieu_data
+    
+    # Save temporary reviewed/edited data for report
+    try:
+        if sign_in_out_data is not None and not sign_in_out_data.empty:
+            sign_in_out_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx'), index=False)
+        if apply_data is not None and not apply_data.empty:
+            apply_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx'), index=False)
+        if ot_lieu_data is not None and not ot_lieu_data.empty:
+            ot_lieu_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx'), index=False)
+    except Exception as e:
+        print(f"Error saving temporary data: {e}")
     
     if sign_in_out_data is None or sign_in_out_data.empty:
         return jsonify({'error': 'No sign in/out data available'}), 400
@@ -972,15 +983,15 @@ def update_otlieu_row():
                     real = round(diff, 2)
                     user_val = ot_lieu_data.at[idx, sum_ot_col] if not isinstance(ot_lieu_data.at[idx, sum_ot_col], dict) else ot_lieu_data.at[idx, sum_ot_col].get('value')
                     try:
-                        user_val_f = float(user_val)
+                        user_val_f = float(str(user_val).replace(',', '.'))
                     except:
                         user_val_f = None
-                    if user_val_f is None or abs(real - user_val_f) > 0.01:
-                        ot_lieu_data.at[idx, sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
-                        updated[sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
-                    else:
+                    if user_val_f is not None and abs(real - user_val_f) <= 0.01:
                         ot_lieu_data.at[idx, sum_ot_col] = real
                         updated[sum_ot_col] = real
+                    else:
+                        ot_lieu_data.at[idx, sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
+                        updated[sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
             # Lieu
             if col in lieu_from_cols + lieu_to_cols and sum_lieu_col:
                 lieu_from = ot_lieu_data.at[idx, lieu_from_cols[0]] if not isinstance(ot_lieu_data.at[idx, lieu_from_cols[0]], dict) else ot_lieu_data.at[idx, lieu_from_cols[0]].get('value')
@@ -997,15 +1008,15 @@ def update_otlieu_row():
                     real = round(diff, 2)
                     user_val = ot_lieu_data.at[idx, sum_lieu_col] if not isinstance(ot_lieu_data.at[idx, sum_lieu_col], dict) else ot_lieu_data.at[idx, sum_lieu_col].get('value')
                     try:
-                        user_val_f = float(user_val)
+                        user_val_f = float(str(user_val).replace(',', '.'))
                     except:
                         user_val_f = None
-                    if user_val_f is None or abs(real - user_val_f) > 0.01:
-                        ot_lieu_data.at[idx, sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
-                        updated[sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
-                    else:
+                    if user_val_f is not None and abs(real - user_val_f) <= 0.01:
                         ot_lieu_data.at[idx, sum_lieu_col] = real
                         updated[sum_lieu_col] = real
+                    else:
+                        ot_lieu_data.at[idx, sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
+                        updated[sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
             return jsonify({'success': True, 'updated': updated})
         else:
             return jsonify({'error': 'Invalid index or column'}), 400
