@@ -1168,6 +1168,20 @@
                     const time24hRegex = /^([01]?\d|2[0-3]):[0-5]\d$/;
                     if (!time24hRegex.test(newValue.trim())) {
                         var timeFormatModal = new bootstrap.Modal(document.getElementById('timeFormatWarningModal'));
+                        document.querySelector('#timeFormatWarningModal .modal-body').innerHTML =
+                            'Please use the correct format when importing: <b>HH:MM</b>. For example: <b>09:30</b>, <b>17:45</b>, <b>21:00</b>.';
+                        timeFormatModal.show();
+                        return;
+                    }
+                }
+                // Kiểm tra ô Sum (OT Sum, Lieu Sum): chỉ chấp nhận số thập phân, không dấu phẩy, không chữ
+                const columns = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+                const colName = columns[colIdx] || '';
+                if (/sum/i.test(colName)) {
+                    if (!/^[0-9]+(\.[0-9]+)?$/.test(newValue.trim())) {
+                        var timeFormatModal = new bootstrap.Modal(document.getElementById('timeFormatWarningModal'));
+                        document.querySelector('#timeFormatWarningModal .modal-body').innerHTML =
+                            'Please enter a valid decimal number for Sum. Example: <b>8.5</b>, <b>2</b>, <b>10.0</b>';
                         timeFormatModal.show();
                         return;
                     }
@@ -1201,14 +1215,16 @@
                                 let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
                                 if (cell && typeof cell === 'object' && cell.error) {
                                     tds[colIdx].outerHTML = `<td style="background:#ffeaea;position:relative;"><input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;"><div style=\"font-size:0.7em;color:#888;\">Correct value: <span style=\"color:#1976d2;font-weight:bold;\">${cell.suggest ?? ''}</span></div><button class=\"btn btn-sm btn-success\" style=\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\"><i class='fas fa-check'></i></button></td>`;
-                                    // Gán lại event handler cho nút tick
-                                    const newTd = allRows[rowIdx].querySelectorAll('td')[colIdx];
-                                    const btn = newTd.querySelector('button.btn-success');
-                                    if (btn) {
-                                        btn.onclick = function() {
-                                            saveErrorCell(containerId, rowIdx, colIdx, btn);
-                                        };
-                                    }
+                                    // Gán lại event handler cho nút tick (dùng setTimeout để đảm bảo DOM đã cập nhật)
+                                    setTimeout(function() {
+                                        const newTd = allRows[rowIdx].querySelectorAll('td')[colIdx];
+                                        const btn = newTd && newTd.querySelector('button.btn-success');
+                                        if (btn) {
+                                            btn.onclick = function() {
+                                                saveErrorCell(containerId, rowIdx, colIdx, btn);
+                                            };
+                                        }
+                                    }, 0);
                                 } else if (cell && typeof cell === 'object' && cell.warning) {
                                     tds[colIdx].outerHTML = `<td style=\"background:#fffbe6;position:relative;\"><input type=\"text\" class=\"form-control form-control-sm\" value=\"${displayValue}\" style=\"border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;\"><button class=\"btn btn-sm btn-success\" style=\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\" title=\"Lưu chỉnh sửa\"><i class='fas fa-check'></i></button><div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div></td>`;
                                 } else if (cell && typeof cell === 'object' && cell.gray) {
@@ -1229,14 +1245,16 @@
                                     let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
                                     if (cell && typeof cell === 'object' && cell.error) {
                                         tds[sumIdx].outerHTML = `<td style=\"background:#ffeaea;position:relative;\"><input type=\"text\" class=\"form-control form-control-sm\" value=\"${displayValue}\" style=\"border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;\"><div style=\\\"font-size:0.7em;color:#888;\\">Correct value: <span style=\\\"color:#1976d2;font-weight:bold;\\">${cell.suggest ?? ''}</span></div><button class=\\\"btn btn-sm btn-success\\\" style=\\\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\\"><i class='fas fa-check'></i></button></td>`;
-                                        // Gán lại event handler cho nút tick
-                                        const newTd = allRows[rowIdx].querySelectorAll('td')[sumIdx];
-                                        const btn = newTd.querySelector('button.btn-success');
-                                        if (btn) {
-                                            btn.onclick = function() {
-                                                saveErrorCell(containerId, rowIdx, sumIdx, btn);
-                                            };
-                                        }
+                                        // Gán lại event handler cho nút tick (dùng setTimeout để đảm bảo DOM đã cập nhật)
+                                        setTimeout(function() {
+                                            const newTd = allRows[rowIdx].querySelectorAll('td')[sumIdx];
+                                            const btn = newTd && newTd.querySelector('button.btn-success');
+                                            if (btn) {
+                                                btn.onclick = function() {
+                                                    saveErrorCell(containerId, rowIdx, sumIdx, btn);
+                                                };
+                                            }
+                                        }, 0);
                                     } else {
                                         tds[sumIdx].outerHTML = `<td>${displayValue}</td>`;
                                     }
