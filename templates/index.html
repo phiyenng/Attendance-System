@@ -316,6 +316,25 @@
         #rulesTableContainer .special-rules-table input.form-control {
             text-align: center !important;
         }
+        #lieuFollowupTableContainer table th:first-child, #lieuFollowupTableContainer table td:first-child {
+            min-width: 40px;
+            max-width: 50px;
+            width: 45px;
+            text-align: center;
+        }
+        /* OT Lieu Before: màu nền cho các nhóm cột */
+        .ot-payment-col {
+            background: #b3e0ff !important;
+        }
+        .lieu-col {
+            background: #fff7b3 !important;
+        }
+        .lieu-used-col {
+            background: #e0e0e0 !important;
+        }
+        .remark-col {
+            background: #b6e7b0 !important;
+        }
     </style>
 </head>
 <body>
@@ -325,7 +344,7 @@
         <div class="d-flex align-items-center gap-2">
             <button class="btn btn-outline-dark btn-sm nav-tab" id="navRules" onclick="showSection('rulesSection')">Rules</button>
             <button class="btn btn-outline-dark btn-sm nav-tab" id="navEmployeeList" onclick="showSection('employeeListSection')">Employee List</button>
-            <button class="btn btn-outline-primary btn-sm nav-tab" id="navMain" onclick="showSection('mainSection')">Main</button>
+            <button class="btn btn-outline-primary btn-sm nav-tab" id="navMain" onclick="showSection('mainSection')">Data</button>
             <button class="btn btn-outline-secondary btn-sm nav-tab" id="navReport" onclick="showSection('reportSection')">Report</button>
         </div>
     </nav>
@@ -455,7 +474,39 @@
 
             <!-- Report Section -->
             <div id="reportSection" style="display:none;">
-                <div class="text-muted">Report page coming soon...</div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
+                    </div>
+                    <div>
+                        <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
+                        <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
+                    </div>
+                </div>
+                <ul class="nav nav-tabs mb-3" id="reportNavTabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="nav-otlieu-before" data-bs-toggle="tab" href="#otlieuBeforeTab">OT Lieu Before</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="nav-otlieu-report" data-bs-toggle="tab" href="#otlieuReportTab">OT Lieu Report</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="nav-total-attendance" data-bs-toggle="tab" href="#totalAttendanceTab">Total Attendance Detail</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="nav-attendance-report" data-bs-toggle="tab" href="#attendanceReportTab">Attendance Report</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="nav-abnormal" data-bs-toggle="tab" href="#abnormalTab">Abnormal</a>
+                    </li>
+                </ul>
+                <div class="tab-content" id="reportTabContent">
+                    <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
+                    <div class="tab-pane fade" id="otlieuReportTab"> <!-- OT Lieu Report content here --> </div>
+                    <div class="tab-pane fade" id="totalAttendanceTab"> <!-- Total Attendance Detail content here --> </div>
+                    <div class="tab-pane fade" id="attendanceReportTab"> <!-- Attendance Report content here --> </div>
+                    <div class="tab-pane fade" id="abnormalTab"> <!-- Abnormal content here --> </div>
+                </div>
             </div>
 
             <!-- Rules Section -->
@@ -603,6 +654,74 @@
           </div>
           <div class="modal-body" id="otlieuValidationModalBody">
             <!-- Message will be injected here -->
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal for Review Data Preview -->
+    <div class="modal fade" id="reviewDataModal" tabindex="-1" aria-labelledby="reviewDataModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="reviewDataModalLabel">Review Data</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-2" id="reviewDataTabs">
+              <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#reviewSigninoutTab">Sign In/Out</a></li>
+              <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reviewApplyTab">Apply</a></li>
+              <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reviewOtlieuTab">OT Lieu</a></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="reviewSigninoutTab"> <!-- Preview Sign In/Out here --> </div>
+              <div class="tab-pane fade" id="reviewApplyTab"> <!-- Preview Apply here --> </div>
+              <div class="tab-pane fade" id="reviewOtlieuTab"> <!-- Preview OT Lieu here --> </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal for Lieu Followup -->
+    <div class="modal fade" id="lieuFollowupModal" tabindex="-1" aria-labelledby="lieuFollowupModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="lieuFollowupModalLabel">Lieu Followup</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex mb-2 gap-2">
+              <input type="file" id="lieuFollowupImportFile" accept=".xlsx,.xls" class="form-control form-control-sm" style="max-width:220px;">
+              <button class="btn btn-sm btn-primary" id="lieuFollowupImportBtn">Import</button>
+              <button class="btn btn-sm btn-success" id="lieuFollowupAddBtn">Add</button>
+            </div>
+            <div id="lieuFollowupTableContainer"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal cảnh báo thiếu dữ liệu -->
+    <div class="modal fade" id="missingDataModal" tabindex="-1" aria-labelledby="missingDataModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="missingDataModalLabel">Missing Data!</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="missingDataModalBody">
+            Please import all required data files (Sign In/Out, Apply, OT Lieu) in the Data tab before viewing the report.
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
@@ -1618,6 +1737,213 @@
                     showLoading(false);
                     showAlert('danger', 'Failed to save data before report.');
                 });
+        }
+
+        // Back to Edit: chuyển về mainSection, không refresh lại data
+        if(document.getElementById('backToEditBtn')) {
+            document.getElementById('backToEditBtn').onclick = function() {
+                showSection('mainSection');
+            };
+        }
+        // Review Data: hiện modal popup preview các bảng dữ liệu
+        if(document.getElementById('reviewDataBtn')) {
+            document.getElementById('reviewDataBtn').onclick = function() {
+                var reviewModal = new bootstrap.Modal(document.getElementById('reviewDataModal'));
+                reviewModal.show();
+                // Fetch và render dữ liệu từ file tạm vào các tab
+                Promise.all([
+                    fetch('/get_temp_signinout_data').then(res=>res.json()),
+                    fetch('/get_temp_apply_data').then(res=>res.json()),
+                    fetch('/get_temp_otlieu_data').then(res=>res.json())
+                ]).then(([signinout, apply, otlieu]) => {
+                    renderPreviewTable('reviewSigninoutTab', signinout.columns, signinout.data);
+                    renderPreviewTable('reviewApplyTab', apply.columns, apply.data);
+                    renderPreviewTable('reviewOtlieuTab', otlieu.columns, otlieu.data);
+                });
+            };
+        }
+        // Hàm render bảng preview đơn giản
+        function renderPreviewTable(containerId, columns, rows) {
+            const container = document.getElementById(containerId);
+            if (!columns || columns.length === 0) {
+                container.innerHTML = '<div class="text-muted">No data loaded.</div>';
+                return;
+            }
+            const pageSize = 50;
+            let currentPage = 1;
+            const totalPages = Math.ceil(rows.length / pageSize);
+            function renderPage(page) {
+                let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
+                columns.forEach(col => {
+                    let thClass = '';
+                    if (containerId === 'otlieuBeforeTab') {
+                        if ([
+                            'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
+                        ].includes(col)) thClass = 'ot-payment-col';
+                        if ([
+                            'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
+                        ].includes(col) && columns.indexOf(col) > columns.indexOf('Holiday-night Rate 390%')) thClass = 'lieu-col';
+                        if (col === 'Lieu used') thClass = 'lieu-used-col';
+                        if (col === 'Remark') thClass = 'remark-col';
+                    }
+                    html += `<th class="${thClass}">${col}</th>`;
+                });
+                html += '</tr></thead><tbody>';
+                const start = (page - 1) * pageSize;
+                const end = Math.min(start + pageSize, rows.length);
+                for (let i = start; i < end; i++) {
+                    html += '<tr>';
+                    let row = rows[i];
+                    row.forEach((cell, j) => {
+                        let tdClass = '';
+                        const col = columns[j];
+                        if (containerId === 'otlieuBeforeTab') {
+                            if ([
+                                'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
+                            ].includes(col)) tdClass = 'ot-payment-col';
+                            if ([
+                                'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
+                            ].includes(col) && columns.indexOf(col) > columns.indexOf('Holiday-night Rate 390%')) tdClass = 'lieu-col';
+                            if (col === 'Lieu used') tdClass = 'lieu-used-col';
+                            if (col === 'Remark') tdClass = 'remark-col';
+                        }
+                        let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
+                        html += `<td class="${tdClass}">${displayValue}</td>`;
+                    });
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+                html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
+                html += `<span>Page ${page} of ${totalPages}</span>`;
+                html += `<div>`;
+                html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
+                html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
+                html += `</div></div>`;
+                container.innerHTML = html;
+                document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
+                    if (currentPage > 1) renderPage(currentPage - 1);
+                };
+                document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
+                    if (currentPage < totalPages) renderPage(currentPage + 1);
+                };
+            }
+            renderPage(currentPage);
+        }
+
+        // Lieu Followup modal logic
+        if(document.getElementById('lieuFollowupBtn')) {
+            document.getElementById('lieuFollowupBtn').onclick = function() {
+                var modal = new bootstrap.Modal(document.getElementById('lieuFollowupModal'));
+                loadLieuFollowupTable();
+                modal.show();
+            };
+        }
+        function loadLieuFollowupTable() {
+            fetch('/get_lieu_followup').then(res=>res.json()).then(data => {
+                renderLieuFollowupTable(data.columns, data.data);
+            });
+        }
+        function renderLieuFollowupTable(columns, rows) {
+            const container = document.getElementById('lieuFollowupTableContainer');
+            if (!columns || columns.length === 0) {
+                container.innerHTML = '<div class="text-muted">No data loaded.</div>';
+                return;
+            }
+            let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
+            columns.forEach(col => html += `<th>${col}</th>`);
+            html += '<th>Action</th></tr></thead><tbody>';
+            rows.forEach((row, idx) => {
+                html += '<tr>';
+                row.forEach((cell, j) => {
+                    if (columns[j] === 'Lieu remain previous month') {
+                        html += `<td><input type="number" class="form-control form-control-sm" value="${cell}" onchange="updateLieuFollowupRow(${idx},'${columns[j]}',this.value)"></td>`;
+                    } else if (columns[j] === 'Name') {
+                        html += `<td><input type="text" class="form-control form-control-sm" value="${cell}" onchange="updateLieuFollowupRow(${idx},'${columns[j]}',this.value)"></td>`;
+                    } else {
+                        html += `<td>${cell}</td>`;
+                    }
+                });
+                html += `<td><button class='btn btn-sm btn-danger' onclick='deleteLieuFollowupRow(${idx})'>Delete</button></td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        function updateLieuFollowupRow(idx, col, value) {
+            fetch('/update_lieu_followup_row', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: idx, column: col, value: value})
+            }).then(res => res.json()).then(data => {
+                if (!data.success) alert(data.error||'Update failed!');
+            });
+        }
+        function deleteLieuFollowupRow(idx) {
+            if (!confirm('Delete this row?')) return;
+            fetch('/delete_lieu_followup_row', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: idx})
+            }).then(res => res.json()).then(data => {
+                if (data.success) loadLieuFollowupTable();
+                else alert(data.error||'Delete failed!');
+            });
+        }
+        document.getElementById('lieuFollowupImportBtn').onclick = function() {
+            const fileInput = document.getElementById('lieuFollowupImportFile');
+            if (!fileInput.files[0]) return alert('Choose a file.');
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            fetch('/import_lieu_followup', {
+                method: 'POST',
+                body: formData
+            }).then(res => res.json()).then(data => {
+                if (data.success) loadLieuFollowupTable();
+                else alert(data.error||'Import failed!');
+            });
+        };
+        document.getElementById('lieuFollowupAddBtn').onclick = function() {
+            const name = prompt('Employee name?');
+            if (!name) return;
+            const remain = prompt('Lieu remain previous month?', '0');
+            fetch('/add_lieu_followup_row', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({Name: name, 'Lieu remain previous month': remain})
+            }).then(res => res.json()).then(data => {
+                if (data.success) loadLieuFollowupTable();
+                else alert(data.error||'Add failed!');
+            });
+        };
+
+        // OT Lieu Before tab logic
+        function loadOtlieuBeforeTab() {
+            const container = document.getElementById('otlieuBeforeTab');
+            container.innerHTML = '<div class="text-muted">Loading...</div>';
+            fetch('/get_otlieu_before').then(res=>res.json()).then(data => {
+                renderPreviewTable('otlieuBeforeTab', data.columns, data.data);
+            });
+        }
+        // Gọi khi chuyển tab OT Lieu Before
+        if(document.getElementById('nav-otlieu-before')) {
+            document.getElementById('nav-otlieu-before').addEventListener('shown.bs.tab', loadOtlieuBeforeTab);
+        }
+
+        // Chặn chuyển sang tab Report nếu thiếu dữ liệu
+        if(document.getElementById('navReport')) {
+            document.getElementById('navReport').onclick = function(e) {
+                // Kiểm tra cachedTables đã có dữ liệu chưa
+                if (!cachedTables.signinout || !cachedTables.signinout.data || cachedTables.signinout.data.length === 0 ||
+                    !cachedTables.apply || !cachedTables.apply.data || cachedTables.apply.data.length === 0 ||
+                    !cachedTables.otlieu || !cachedTables.otlieu.data || cachedTables.otlieu.data.length === 0) {
+                    e.preventDefault();
+                    var modal = new bootstrap.Modal(document.getElementById('missingDataModal'));
+                    modal.show();
+                    return false;
+                }
+                // Nếu đủ dữ liệu thì cho chuyển tab
+                showSection('reportSection');
+            };
         }
     </script>
 </body>

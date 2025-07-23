@@ -526,18 +526,13 @@ def import_signinout():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
-
-        # Load data
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
-
-            # For .xls, explicitly set engine if needed
             df = pd.read_excel(file_path, engine='xlrd')
         else:
             df = pd.read_excel(file_path)
 
-        # Only keep emp_name and attendance_time
         keep = [col for col in df.columns if col.lower() in ['emp_name', 'attendance_time']]
         df = df[keep]
         sign_in_out_data = df.reset_index(drop=True)
@@ -562,11 +557,10 @@ def import_apply():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
-        # Load data
+    
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
-            # For .xls, explicitly set engine if needed
             df = pd.read_excel(file_path, engine='xlrd')
         else:
             df = pd.read_excel(file_path)
@@ -598,10 +592,8 @@ def import_otlieu():
         # Load data
         data = load_excel_data(file_path)
         if data is not None:
-            # Nếu có cột tên đúng 'OT From Note: 12AM is midnight', đổi thành 'OT From'
             if 'OT From Note: 12AM is midnight' in data.columns:
                 data = data.rename(columns={'OT From Note: 12AM is midnight': 'OT From'})
-            # Xử lý theo rule
             data = process_ot_lieu_df(data, employee_list_df)
             ot_lieu_data = data
             return jsonify({
@@ -623,10 +615,17 @@ def calculate_abnormal():
     try:
         if sign_in_out_data is not None and not sign_in_out_data.empty:
             sign_in_out_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx'), index=False)
+        
         if apply_data is not None and not apply_data.empty:
-            apply_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx'), index=False)
+            if 'Results' in apply_data.columns:
+                approved_apply = apply_data[apply_data['Results'] == 'Approved']
+            else:
+                approved_apply = apply_data
+            approved_apply.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx'), index=False)
+        
         if ot_lieu_data is not None and not ot_lieu_data.empty:
-            ot_lieu_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx'), index=False)
+            ot_lieu_save = ot_lieu_data.applymap(flatten_cell)
+            ot_lieu_save.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx'), index=False)
     except Exception as e:
         print(f"Error saving temporary data: {e}")
     
@@ -956,11 +955,11 @@ def update_otlieu_row():
         idx = int(data.get('index'))
         col = data.get('column')
         value = data.get('value')
-        # Xóa debug log
         if ot_lieu_data is not None and 0 <= idx < len(ot_lieu_data) and col in ot_lieu_data.columns:
+            # Luôn cập nhật giá trị mới vào DataFrame, không trả về object warning/error nữa
             ot_lieu_data.at[idx, col] = value
-            # Nếu user sửa OT From/To hoặc Lieu From/To thì tính lại sum và trả về giá trị mới
             updated = {}
+            # Nếu là cột OT/Lieu Sum, có thể tính lại giá trị thực tế và trả về nếu cần
             ot_from_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*from', c, re.I)]
             ot_to_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*to', c, re.I)]
             sum_ot_col = next((c for c in ot_lieu_data.columns if re.search(r'ot.*sum', c, re.I)), None)
@@ -969,8 +968,8 @@ def update_otlieu_row():
             sum_lieu_col = next((c for c in ot_lieu_data.columns if re.search(r'lieu.*sum', c, re.I)), None)
             # OT
             if col in ot_from_cols + ot_to_cols and sum_ot_col:
-                ot_from = ot_lieu_data.at[idx, ot_from_cols[0]] if not isinstance(ot_lieu_data.at[idx, ot_from_cols[0]], dict) else ot_lieu_data.at[idx, ot_from_cols[0]].get('value')
-                ot_to = ot_lieu_data.at[idx, ot_to_cols[0]] if not isinstance(ot_lieu_data.at[idx, ot_to_cols[0]], dict) else ot_lieu_data.at[idx, ot_to_cols[0]].get('value')
+                ot_from = ot_lieu_data.at[idx, ot_from_cols[0]]
+                ot_to = ot_lieu_data.at[idx, ot_to_cols[0]]
                 if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_to)):
                     t1 = datetime.strptime(str(ot_from), '%H:%M')
                     t2 = datetime.strptime(str(ot_to), '%H:%M')
@@ -981,21 +980,12 @@ def update_otlieu_row():
                         if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
                             diff -= 1.5
                     real = round(diff, 2)
-                    user_val = ot_lieu_data.at[idx, sum_ot_col] if not isinstance(ot_lieu_data.at[idx, sum_ot_col], dict) else ot_lieu_data.at[idx, sum_ot_col].get('value')
-                    try:
-                        user_val_f = float(str(user_val).replace(',', '.'))
-                    except:
-                        user_val_f = None
-                    if user_val_f is not None and abs(real - user_val_f) <= 0.01:
-                        ot_lieu_data.at[idx, sum_ot_col] = real
-                        updated[sum_ot_col] = real
-                    else:
-                        ot_lieu_data.at[idx, sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
-                        updated[sum_ot_col] = {'value': user_val, 'error': True, 'suggest': real}
+                    ot_lieu_data.at[idx, sum_ot_col] = real
+                    updated[sum_ot_col] = real
             # Lieu
             if col in lieu_from_cols + lieu_to_cols and sum_lieu_col:
-                lieu_from = ot_lieu_data.at[idx, lieu_from_cols[0]] if not isinstance(ot_lieu_data.at[idx, lieu_from_cols[0]], dict) else ot_lieu_data.at[idx, lieu_from_cols[0]].get('value')
-                lieu_to = ot_lieu_data.at[idx, lieu_to_cols[0]] if not isinstance(ot_lieu_data.at[idx, lieu_to_cols[0]], dict) else ot_lieu_data.at[idx, lieu_to_cols[0]].get('value')
+                lieu_from = ot_lieu_data.at[idx, lieu_from_cols[0]]
+                lieu_to = ot_lieu_data.at[idx, lieu_to_cols[0]]
                 if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_to)):
                     t1 = datetime.strptime(str(lieu_from), '%H:%M')
                     t2 = datetime.strptime(str(lieu_to), '%H:%M')
@@ -1006,17 +996,8 @@ def update_otlieu_row():
                         if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
                             diff -= 1.5
                     real = round(diff, 2)
-                    user_val = ot_lieu_data.at[idx, sum_lieu_col] if not isinstance(ot_lieu_data.at[idx, sum_lieu_col], dict) else ot_lieu_data.at[idx, sum_lieu_col].get('value')
-                    try:
-                        user_val_f = float(str(user_val).replace(',', '.'))
-                    except:
-                        user_val_f = None
-                    if user_val_f is not None and abs(real - user_val_f) <= 0.01:
-                        ot_lieu_data.at[idx, sum_lieu_col] = real
-                        updated[sum_lieu_col] = real
-                    else:
-                        ot_lieu_data.at[idx, sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
-                        updated[sum_lieu_col] = {'value': user_val, 'error': True, 'suggest': real}
+                    ot_lieu_data.at[idx, sum_lieu_col] = real
+                    updated[sum_lieu_col] = real
             return jsonify({'success': True, 'updated': updated})
         else:
             return jsonify({'error': 'Invalid index or column'}), 400
@@ -1140,6 +1121,300 @@ def reload_rules():
             return jsonify({'success': False, 'error': 'Rules file not found'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/get_temp_signinout_data')
+def get_temp_signinout_data():
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
+    if not os.path.exists(path):
+        return jsonify({'columns': [], 'data': []})
+    df = pd.read_excel(path)
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+@app.route('/get_temp_apply_data')
+def get_temp_apply_data():
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
+    if not os.path.exists(path):
+        return jsonify({'columns': [], 'data': []})
+    df = pd.read_excel(path)
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+@app.route('/get_temp_otlieu_data')
+def get_temp_otlieu_data():
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+    if not os.path.exists(path):
+        return jsonify({'columns': [], 'data': []})
+    df = pd.read_excel(path)
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+LIEU_FOLLOWUP_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
+
+@app.route('/get_lieu_followup')
+def get_lieu_followup():
+    if not os.path.exists(LIEU_FOLLOWUP_PATH):
+        # Nếu chưa có file, tạo file mặc định từ employee_list
+        if employee_list_df is not None and not employee_list_df.empty:
+            df = employee_list_df[['Name']].copy()
+            df['Lieu remain previous month'] = 0
+            df.insert(0, 'STT', range(1, len(df) + 1))
+            df.to_excel(LIEU_FOLLOWUP_PATH, index=False)
+        else:
+            df = pd.DataFrame(columns=['STT', 'Name', 'Lieu remain previous month'])
+    else:
+        df = pd.read_excel(LIEU_FOLLOWUP_PATH)
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+@app.route('/import_lieu_followup', methods=['POST'])
+def import_lieu_followup():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    try:
+        df = pd.read_excel(file)
+        # Chuẩn hóa cột
+        if 'Name' not in df.columns:
+            return jsonify({'error': 'Missing Name column'}), 400
+        if 'Lieu remain previous month' not in df.columns:
+            df['Lieu remain previous month'] = 0
+        df = df[['Name', 'Lieu remain previous month']]
+        df.insert(0, 'STT', range(1, len(df) + 1))
+        df.to_excel(LIEU_FOLLOWUP_PATH, index=False)
+        return jsonify({'success': True, 'rows': len(df)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/add_lieu_followup_row', methods=['POST'])
+def add_lieu_followup_row():
+    try:
+        data = request.json
+        name = data.get('Name', '').strip()
+        remain = data.get('Lieu remain previous month', 0)
+        if not name:
+            return jsonify({'error': 'Name required'}), 400
+        if os.path.exists(LIEU_FOLLOWUP_PATH):
+            df = pd.read_excel(LIEU_FOLLOWUP_PATH)
+        else:
+            df = pd.DataFrame(columns=['STT', 'Name', 'Lieu remain previous month'])
+        df = df.append({'Name': name, 'Lieu remain previous month': remain}, ignore_index=True)
+        df['STT'] = range(1, len(df) + 1)
+        df.to_excel(LIEU_FOLLOWUP_PATH, index=False)
+        return jsonify({'success': True, 'rows': len(df)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/update_lieu_followup_row', methods=['POST'])
+def update_lieu_followup_row():
+    try:
+        data = request.json
+        idx = int(data.get('index'))
+        col = data.get('column')
+        value = data.get('value')
+        if os.path.exists(LIEU_FOLLOWUP_PATH):
+            df = pd.read_excel(LIEU_FOLLOWUP_PATH)
+        else:
+            return jsonify({'error': 'No data'}), 400
+        if 0 <= idx < len(df) and col in df.columns:
+            df.at[idx, col] = value
+            df.to_excel(LIEU_FOLLOWUP_PATH, index=False)
+            return jsonify({'success': True})
+        else:
+            return jsonify({'error': 'Invalid index or column'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/delete_lieu_followup_row', methods=['POST'])
+def delete_lieu_followup_row():
+    try:
+        data = request.json
+        idx = int(data.get('index'))
+        if os.path.exists(LIEU_FOLLOWUP_PATH):
+            df = pd.read_excel(LIEU_FOLLOWUP_PATH)
+        else:
+            return jsonify({'error': 'No data'}), 400
+        if 0 <= idx < len(df):
+            df = df.drop(idx).reset_index(drop=True)
+            df['STT'] = range(1, len(df) + 1)
+            df.to_excel(LIEU_FOLLOWUP_PATH, index=False)
+            return jsonify({'success': True})
+        else:
+            return jsonify({'error': 'Invalid index'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/get_otlieu_before')
+def get_otlieu_before():
+    # Đọc file temp_otlieu.xlsx
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+    if not os.path.exists(path):
+        return jsonify({'columns': [], 'data': []})
+    df = pd.read_excel(path)
+    # Các cột kết quả cần thêm
+    ot_types = [
+        ('Weekday Rate 150%', 1.5),
+        ('Weekday-night Rate 200%', 2.0),
+        ('Weekend Rate 200%', 2.0),
+        ('Weekend-night Rate 270%', 2.7),
+        ('Holiday Rate 300%', 3.0),
+        ('Holiday-night Rate 390%', 3.9),
+    ]
+    # Thêm cột OT Payment (nền xanh) và Change in lieu (nền vàng)
+    for col, _ in ot_types:
+        df['OT Payment: ' + col] = 0.0
+        df['Change in lieu: ' + col] = 0.0
+    # Hàm xác định loại ngày
+    def get_day_type(dt, holidays, special_workdays):
+        if dt in holidays:
+            return 'Holiday'
+        if dt in special_workdays:
+            return 'Weekday'
+        if dt.weekday() >= 5:
+            return 'Weekend'
+        return 'Weekday'
+    # Lấy ngày nghỉ/làm đặc biệt từ rules
+    holidays = set()
+    special_workdays = set()
+    try:
+        if rules is not None:
+            if 'Holiday Date in This Year' in rules.columns:
+                holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
+            if 'Special Work Day' in rules.columns:
+                special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+    except: pass
+    # Xử lý từng dòng OT Lieu
+    for idx, row in df.iterrows():
+        # Lấy ngày OT (ưu tiên OT Day, hoặc Lieu Date, hoặc Start Date)
+        ot_date = None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'day' in col.lower() and pd.notna(row[col]):
+                try: ot_date = pd.to_datetime(row[col]).date(); break
+                except: pass
+        if ot_date is None:
+            for col in df.columns:
+                if 'lieu' in col.lower() and 'date' in col.lower() and pd.notna(row[col]):
+                    try: ot_date = pd.to_datetime(row[col]).date(); break
+                    except: pass
+        if ot_date is None:
+            continue
+        # Lấy OT From/To
+        ot_from, ot_to = None, None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'from' in col.lower():
+                ot_from = row[col]
+            if 'ot' in col.lower() and 'to' in col.lower():
+                ot_to = row[col]
+        # Chỉ xử lý nếu đủ dữ liệu
+        if not ot_from or not ot_to or pd.isna(ot_from) or pd.isna(ot_to):
+            continue
+        # Chuyển về datetime
+        try:
+            t1 = pd.to_datetime(str(ot_from), format='%H:%M')
+            t2 = pd.to_datetime(str(ot_to), format='%H:%M')
+        except:
+            continue
+        # Nếu OT qua nửa đêm
+        if t2 < t1:
+            t2 = t2 + pd.Timedelta(days=1)
+        # Tính block ngày/đêm
+        blocks = []
+        cur = t1
+        while cur < t2:
+            # Xác định block hiện tại
+            hour = cur.hour + cur.minute/60
+            if 6 <= hour < 22:
+                # OT ngày: kết thúc block là 22:00 hoặc t2
+                block_end = min(cur.replace(hour=22, minute=0), t2)
+                block_type = 'day'
+            else:
+                # OT đêm: kết thúc block là 6:00 hôm sau hoặc t2
+                if hour < 6:
+                    next6 = cur.replace(hour=6, minute=0)
+                    if next6 <= cur: next6 += pd.Timedelta(days=1)
+                    block_end = min(next6, t2)
+                else:
+                    next22 = cur.replace(hour=22, minute=0)
+                    if next22 <= cur: next22 += pd.Timedelta(days=1)
+                    block_end = min(next22, t2)
+                block_type = 'night'
+            # Xác định loại ngày cho block
+            block_date = (ot_date if cur.day == t1.day else ot_date + pd.Timedelta(days=1))
+            day_type = get_day_type(block_date, holidays, special_workdays)
+            # Tính số giờ block
+            hours = (block_end - cur).total_seconds() / 3600
+            # Trừ 1.5h nếu block ngày và block giao với 12:00-13:30
+            if block_type == 'day':
+                lunch_start = cur.replace(hour=12, minute=0)
+                lunch_end = cur.replace(hour=13, minute=30)
+                overlap = max(timedelta(0), min(block_end, lunch_end) - max(cur, lunch_start)).total_seconds() / 3600
+                if overlap > 0:
+                    hours -= overlap
+            # Gán vào cột phù hợp
+            if day_type == 'Weekday' and block_type == 'day':
+                df.at[idx, 'OT Payment: Weekday Rate 150%'] += hours
+            if day_type == 'Weekday' and block_type == 'night':
+                df.at[idx, 'OT Payment: Weekday-night Rate 200%'] += hours
+            if day_type == 'Weekend' and block_type == 'day':
+                df.at[idx, 'OT Payment: Weekend Rate 200%'] += hours
+            if day_type == 'Weekend' and block_type == 'night':
+                df.at[idx, 'OT Payment: Weekend-night Rate 270%'] += hours
+            if day_type == 'Holiday' and block_type == 'day':
+                df.at[idx, 'OT Payment: Holiday Rate 300%'] += hours
+            if day_type == 'Holiday' and block_type == 'night':
+                df.at[idx, 'OT Payment: Holiday-night Rate 390%'] += hours
+            # Change in lieu: copy logic, có thể điều chỉnh sau
+            if day_type == 'Weekday' and block_type == 'day':
+                df.at[idx, 'Change in lieu: Weekday Rate 150%'] += hours
+            if day_type == 'Weekday' and block_type == 'night':
+                df.at[idx, 'Change in lieu: Weekday-night Rate 200%'] += hours
+            if day_type == 'Weekend' and block_type == 'day':
+                df.at[idx, 'Change in lieu: Weekend Rate 200%'] += hours
+            if day_type == 'Weekend' and block_type == 'night':
+                df.at[idx, 'Change in lieu: Weekend-night Rate 270%'] += hours
+            if day_type == 'Holiday' and block_type == 'day':
+                df.at[idx, 'Change in lieu: Holiday Rate 300%'] += hours
+            if day_type == 'Holiday' and block_type == 'night':
+                df.at[idx, 'Change in lieu: Holiday-night Rate 390%'] += hours
+            cur = block_end
+    # Trả về
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    # Đổi tên cột cho đúng format frontend
+    payment_cols = [c for c in df.columns if c.startswith('OT Payment: ')]
+    lieu_cols = [c for c in df.columns if c.startswith('Change in lieu: ')]
+    # Đổi tên
+    rename_map = {}
+    for c in payment_cols:
+        rename_map[c] = c.replace('OT Payment: ', '')
+    for c in lieu_cols:
+        rename_map[c] = c.replace('Change in lieu: ', '')
+    df = df.rename(columns=rename_map)
+    # Đảm bảo thứ tự: các cột gốc, payment, lieu, Lieu used, Remark
+    base_cols = [c for c in df.columns if c not in rename_map.values() and not c.startswith('Change in lieu: ') and not c.startswith('OT Payment: ')]
+    payment_cols_new = [c.replace('OT Payment: ', '') for c in payment_cols]
+    lieu_cols_new = [c.replace('Change in lieu: ', '') for c in lieu_cols]
+    # Thêm Lieu used, Remark nếu chưa có
+    if 'Lieu used' not in df.columns:
+        df['Lieu used'] = ''
+    if 'Remark' not in df.columns:
+        df['Remark'] = ''
+    col_order = base_cols + payment_cols_new + lieu_cols_new + ['Lieu used', 'Remark']
+    df = df[[c for c in col_order if c in df.columns]]
+    cols = list(df.columns)
+    rows = df.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+def flatten_cell(cell):
+    if isinstance(cell, dict) and 'value' in cell:
+        return cell['value']
+    return cell
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 
