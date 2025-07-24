@@ -1856,7 +1856,6 @@
                     }
                     html += '</tr><tr>';
                     // Dòng 2: tên cột con
-                    // Dòng 2: tên cột con
                     if (otPaymentCols.length > 0) {
                         otPaymentCols.forEach(idx => {
                             html += `<th style="background:#e3f2fd;">${columns[idx].replace('OT Payment: ', '')}</th>`;
@@ -1866,15 +1865,6 @@
                         changeInLieuCols.forEach(idx => {
                             html += `<th style="background:#fffde7;">${columns[idx].replace('Change in lieu: ', '')}</th>`;
                         });
-                    }
-                    // Thêm 2 cột "Lieu used" và "Remark" nếu có trong columns
-                    const lieuUsedIdx = columns.indexOf('Lieu used');
-                    if (lieuUsedIdx !== -1) {
-                        html += `<th rowspan="2" style="background:#e0e0e0;">Lieu used</th>`;
-                    }
-                    const remarkIdx = columns.indexOf('Remark');
-                    if (remarkIdx !== -1) {
-                        html += `<th rowspan="2" style="background:#b6e7b0;">Remark</th>`;
                     }
                     html += '</tr></thead>';
                     // Body
