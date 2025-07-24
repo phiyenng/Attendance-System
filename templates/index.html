@@ -1141,6 +1141,7 @@
             let editingRow = null;
             
             function renderPage(page) {
+                currentPage = page;
                 const container = document.getElementById(containerId);
                 // Restore scroll position if available
                 setTimeout(function() {
@@ -1767,6 +1768,7 @@
 
 
             function renderPage(page) {
+                currentPage = page;
                 let html = '<div class="table-responsive"><table class="table table-bordered">';
 
                 // Total Attendance Detail Tab Logic
@@ -1821,6 +1823,7 @@
                     html += `<th colspan="2" class="timeoff-col">Time off in lieu (hour)</th>`;
                     remainCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
                     html += '</tr><tr>';
+                    
                     otPayCols.forEach(c => html += `<th class="ot-payment-col">${c}</th>`);
                     otLieuCols.forEach(c => html += `<th class="lieu-col">${c}</th>`);
                     timeoffCols.forEach(c => html += `<th class="timeoff-col">${c}</th>`);

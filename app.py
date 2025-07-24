@@ -1224,11 +1224,11 @@ def delete_lieu_followup_row():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-@app.route('/get_otlieu_before')
-def get_otlieu_before():
+# ==== TÍNH TOÁN OT LIEU BEFORE (HÀM CHUNG) ====
+def calculate_otlieu_before():
     path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
     if not os.path.exists(path):
-        return jsonify({'columns': [], 'data': []})
+        return pd.DataFrame()
     df = pd.read_excel(path)
 
     # Load Lieu followup
@@ -1238,7 +1238,7 @@ def get_otlieu_before():
     else:
         lieu_followup_df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
 
-    # Build remain map
+    # Build remain map: {name: remain}
     lieu_remain_map = {}
     if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
         for _, r in lieu_followup_df.iterrows():
@@ -1286,8 +1286,7 @@ def get_otlieu_before():
                 special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
             if 'Special Weekend' in rules.columns:
                 special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
-    except:
-        pass
+    except: pass
 
     for idx, row in df.iterrows():
         emp_id = row['Emp ID'] if 'Emp ID' in row else None
@@ -1376,6 +1375,7 @@ def get_otlieu_before():
             df[col] = df[col].apply(lambda x: round(float(x), 3) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x)
 
     # Tính Lieu used
+    import numpy as np
     for idx, row in df.iterrows():
         name = row['Name'] if 'Name' in row else None
         lieu_needed = 0.0
@@ -1405,7 +1405,7 @@ def get_otlieu_before():
                 lieu_remain_map[name] = 0.0
         df.at[idx, 'Lieu used'] = round(used, 2) if used else np.nan
 
-    # >>> START: Trừ từ OT Payment theo hệ số ưu tiên
+    # Trừ từ OT Payment theo hệ số ưu tiên
     priority_order = [
         ('OT Payment: Weekday Rate 150%', 1.5),
         ('OT Payment: Weekday-night Rate 200%', 2.0),
@@ -1414,7 +1414,6 @@ def get_otlieu_before():
         ('OT Payment: Holiday Rate 300%', 3.0),
         ('OT Payment: Holiday-night Rate 390%', 3.9),
     ]
-
     for idx, row in df.iterrows():
         used = row.get('Lieu used', 0)
         if not pd.isna(used) and used > 0:
@@ -1432,7 +1431,6 @@ def get_otlieu_before():
                 else:
                     remaining_lieu = round(remaining_lieu - available * ratio, 3)
                     df.at[idx, col] = 0.0
-    # >>> END
 
     # Ensure 'Lieu used' and 'Remark' columns exist before reordering
     if 'Lieu used' not in df.columns:
@@ -1441,13 +1439,19 @@ def get_otlieu_before():
         df['Remark'] = np.nan
     cols = [c for c in df.columns if c not in ['Lieu used', 'Remark']] + ['Lieu used', 'Remark']
     df = df[cols]
+    return df
+
+@app.route('/get_otlieu_before')
+def get_otlieu_before():
+    df = calculate_otlieu_before()
+    if df.empty:
+        return jsonify({'columns': [], 'data': []})
+    cols = list(df.columns)
     rows = df.fillna('').astype(str).values.tolist()
     return jsonify({'columns': cols, 'data': rows})
 
-
 @app.route('/get_otlieu_report')
 def get_otlieu_report():
-    # Đọc danh sách nhân viên
     emp_path = EMPLOYEE_LIST_PATH
     if os.path.exists(emp_path):
         emp_df = pd.read_csv(emp_path, dtype=str)
@@ -1455,15 +1459,8 @@ def get_otlieu_report():
         emp_df = pd.DataFrame(columns=["Name", "ID Number"])
     emp_df = emp_df.fillna('')
     emp_df['No'] = range(1, len(emp_df) + 1)
-    
-    # Đọc OT Lieu Before
-    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
-    if os.path.exists(path):
-        ot_df = pd.read_excel(path)
-    else:
-        ot_df = pd.DataFrame()
 
-    # Các cột OT cần tổng hợp (theo ảnh)
+    ot_df = calculate_otlieu_before()
     ot_cols = [
         'OT Payment: Weekday Rate 150%',
         'OT Payment: Weekday-night Rate 200%',
@@ -1478,17 +1475,35 @@ def get_otlieu_report():
         'Change in lieu: Holiday Rate 300%',
         'Change in lieu: Holiday-night Rate 390%',
     ]
-    # Group by ID Number, sum các cột OT
     ot_sum = None
-    if not ot_df.empty and 'Emp ID' in ot_df.columns:
-        ot_sum = ot_df.groupby('Emp ID')[ot_cols].sum().reset_index()
-    # Merge vào danh sách nhân viên
+    if not ot_df.empty and 'Name' in ot_df.columns:
+        ot_df[ot_cols] = ot_df[ot_cols].fillna(0)
+        ot_sum = ot_df.groupby('Name')[ot_cols].sum().reset_index()
+        used_cols = [c for c in ot_cols if c.startswith('Change in lieu')]
+        paid_cols = [c for c in ot_cols if c.startswith('OT Payment')]
+        ot_sum['Total used hours in month'] = ot_sum[used_cols].sum(axis=1)
+        ot_sum['Total OT paid'] = ot_sum[paid_cols].sum(axis=1)
+        def calc_transfer(row):
+            try:
+                val = float(row['Total OT paid'])
+                return round(val - 25, 2) if val > 25 else ''
+            except:
+                return ''
+        ot_sum['Transferred to normal working hours'] = ot_sum.apply(calc_transfer, axis=1)
+        ot_sum['Date'] = ''
+        ot_sum['Remain unused time off in lieu'] = ''
+
+    # Đảm bảo cột Name tồn tại ở cả hai DataFrame trước khi merge
     result = emp_df[['No', 'ID Number', 'Name']].copy()
-    result = result.rename(columns={'ID Number': 'Employee ID', 'Name': 'Employee Name'})
+    result = result.rename(columns={'ID Number': 'Employee ID'})
+    # Không đổi tên 'Name' thành 'Employee Name' trước khi merge
     if ot_sum is not None:
-        result = result.merge(ot_sum, left_on='Employee ID', right_on='Emp ID', how='left')
-        result = result.drop(columns=['Emp ID'])
-    # Đổi tên cột cho thân thiện
+        # Ép kiểu và strip để tránh lỗi merge do khác kiểu
+        result['Name'] = result['Name'].astype(str).str.strip()
+        ot_sum['Name'] = ot_sum['Name'].astype(str).str.strip()
+        result = result.merge(ot_sum, on='Name', how='left')
+    # Sau khi merge xong mới đổi tên cột cho thân thiện
+    result = result.rename(columns={'Name': 'Employee Name'})
     col_rename = {
         'OT Payment: Weekday Rate 150%': 'OT weekday 150%',
         'OT Payment: Weekday-night Rate 200%': 'OT weekday night 200%',
@@ -1504,22 +1519,14 @@ def get_otlieu_report():
         'Change in lieu: Holiday-night Rate 390%': 'OT public holiday night 390% (lieu)',
     }
     result = result.rename(columns=col_rename)
-    # Thêm các cột Time off in lieu, Remain unused time off in lieu, Total OT paid... để trống
-    extra_cols = [
-        'Transferred to normal working hours',
-        'Date',
-        'Total used hours in month',
-        'Remain unused time off in lieu',
-        'Total OT paid'
-    ]
-    for c in extra_cols:
-        result[c] = ''
-    # Thứ tự cột đúng mẫu
     col_order = [
         'No', 'Employee ID', 'Employee Name',
-        'OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%', 'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%',
-        'OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)', 'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)', 'Transferred to normal working hours',
-        'Date', 'Total used hours in month', 'Remain unused time off in lieu', 'Total OT paid'
+        'OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%',
+        'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%',
+        'OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)',
+        'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)',
+        'Transferred to normal working hours', 'Date', 'Total used hours in month',
+        'Remain unused time off in lieu', 'Total OT paid'
     ]
     result = result[[c for c in col_order if c in result.columns]]
     cols = list(result.columns)
@@ -1543,6 +1550,12 @@ def get_total_attendance_detail():
         'Name': "Employee's name",
         'Dept': 'Group'
     })
+
+    # Sắp xếp theo Group nếu có
+    if 'Group' in result.columns:
+        result = result.sort_values(by=['Group', 'No'], ascending=[True, True])
+        result = result.reset_index(drop=True)
+        result['No'] = range(1, len(result) + 1)
 
     # Thêm các cột Attendance & Violation mặc định là rỗng (hoặc 0)
     for col in [
@@ -1601,6 +1614,11 @@ def get_attendance_report():
         emp_df = pd.read_csv(emp_path, dtype=str)
     else:
         emp_df = pd.DataFrame(columns=["Dept", "Name"])
+
+    # Sắp xếp theo Dept nếu có
+    if 'Dept' in emp_df.columns:
+        emp_df = emp_df.sort_values(by=['Dept', 'Name'], ascending=[True, True])
+        emp_df = emp_df.reset_index(drop=True)
 
     # Tạo dãy ngày từ 20 tháng trước đến 19 tháng này
     if month == 1:
