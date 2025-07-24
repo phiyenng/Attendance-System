@@ -1238,7 +1238,7 @@ def get_otlieu_before():
     else:
         lieu_followup_df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
 
-    # Build remain map: {name: remain}
+    # Build remain map
     lieu_remain_map = {}
     if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
         for _, r in lieu_followup_df.iterrows():
@@ -1263,14 +1263,122 @@ def get_otlieu_before():
     for col in change_in_lieu_types:
         df['Change in lieu: ' + col] = 0.0
 
-    # (Assume block splitting and OT/Lieu calculation logic is already present here)
-    # ...
+    # Hàm xác định loại ngày
+    def get_day_type(dt, holidays, special_weekends, special_workdays):
+        if dt in holidays:
+            return 'Holiday'
+        if dt in special_workdays:
+            return 'Weekday'
+        if dt in special_weekends:
+            return 'Weekend'
+        if dt.weekday() >= 5:
+            return 'Weekend'
+        return 'Weekday'
 
-    # Deduct Lieu used from remain, in priority order
+    holidays = set()
+    special_workdays = set()
+    special_weekends = set()
+    try:
+        if rules is not None:
+            if 'Holiday Date in This Year' in rules.columns:
+                holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
+            if 'Special Work Day' in rules.columns:
+                special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+            if 'Special Weekend' in rules.columns:
+                special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
+    except:
+        pass
+
+    for idx, row in df.iterrows():
+        emp_id = row['Emp ID'] if 'Emp ID' in row else None
+        intern = is_intern(emp_id, employee_list_df)
+
+        ot_date = None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'day' in col.lower() and pd.notna(row[col]):
+                try:
+                    ot_date = pd.to_datetime(row[col]).date()
+                    break
+                except:
+                    pass
+        if ot_date is None:
+            for col in df.columns:
+                if 'lieu' in col.lower() and 'date' in col.lower() and pd.notna(row[col]):
+                    try:
+                        ot_date = pd.to_datetime(row[col]).date()
+                        break
+                    except:
+                        pass
+        if ot_date is None:
+            continue
+
+        ot_from, ot_to = None, None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'from' in col.lower():
+                ot_from = row[col]
+            if 'ot' in col.lower() and 'to' in col.lower():
+                ot_to = row[col]
+        if not ot_from or not ot_to or pd.isna(ot_from) or pd.isna(ot_to):
+            continue
+        try:
+            t1 = pd.to_datetime(str(ot_from), format='%H:%M')
+            t2 = pd.to_datetime(str(ot_to), format='%H:%M')
+        except:
+            continue
+        if t2 < t1:
+            t2 += pd.Timedelta(days=1)
+
+        cur = t1
+        while cur < t2:
+            hour = cur.hour + cur.minute / 60
+            if 6 <= hour < 22:
+                block_end = min(cur.replace(hour=22, minute=0), t2)
+                block_type = 'day'
+            else:
+                if hour < 6:
+                    next6 = cur.replace(hour=6, minute=0)
+                    if next6 <= cur: next6 += pd.Timedelta(days=1)
+                    block_end = min(next6, t2)
+                else:
+                    next22 = cur.replace(hour=22, minute=0)
+                    if next22 <= cur: next22 += pd.Timedelta(days=1)
+                    block_end = min(next22, t2)
+                block_type = 'night'
+            block_date = (ot_date if cur.day == t1.day else ot_date + pd.Timedelta(days=1))
+            day_type = get_day_type(block_date, holidays, special_weekends, special_workdays)
+            hours = (block_end - cur).total_seconds() / 3600
+
+            if block_type == 'day':
+                lunch_start = cur.replace(hour=12, minute=0)
+                lunch_end = cur.replace(hour=13, minute=30)
+                overlap = max(timedelta(0), min(block_end, lunch_end) - max(cur, lunch_start)).total_seconds() / 3600
+                if overlap > 0:
+                    hours -= overlap
+
+            target_prefix = 'Change in lieu: ' if intern else 'OT Payment: '
+            rate_map = {
+                ('Weekday', 'day'): 'Weekday Rate 150%',
+                ('Weekday', 'night'): 'Weekday-night Rate 200%',
+                ('Weekend', 'day'): 'Weekend Rate 200%',
+                ('Weekend', 'night'): 'Weekend-night Rate 270%',
+                ('Holiday', 'day'): 'Holiday Rate 300%',
+                ('Holiday', 'night'): 'Holiday-night Rate 390%',
+            }
+            rate_label = rate_map.get((day_type, block_type))
+            if rate_label:
+                col = target_prefix + rate_label
+                df.at[idx, col] += hours
+            cur = block_end
+
+    # Làm tròn 3 số
+    for col in ['OT Payment: ' + c for c in ot_payment_types] + ['Change in lieu: ' + c for c in change_in_lieu_types]:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: round(float(x), 3) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x)
+
+    # Tính Lieu used
     for idx, row in df.iterrows():
         name = row['Name'] if 'Name' in row else None
         lieu_needed = 0.0
-        # Calculate Lieu needed from Lieu From/To
         lieu_from_col = next((c for c in df.columns if 'lieu' in c.lower() and 'from' in c.lower()), None)
         lieu_to_col = next((c for c in df.columns if 'lieu' in c.lower() and 'to' in c.lower()), None)
         if lieu_from_col and lieu_to_col and name:
@@ -1295,22 +1403,47 @@ def get_otlieu_before():
             else:
                 used = remain
                 lieu_remain_map[name] = 0.0
-        df.at[idx, 'Lieu used'] = round(used, 2) if used else ''
+        df.at[idx, 'Lieu used'] = round(used, 2) if used else np.nan
 
-    # Round OT/Change columns
-    for col in ['OT Payment: ' + c for c in ot_payment_types] + ['Change in lieu: ' + c for c in change_in_lieu_types]:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: round(float(x), 3) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x)
+    # >>> START: Trừ từ OT Payment theo hệ số ưu tiên
+    priority_order = [
+        ('OT Payment: Weekday Rate 150%', 1.5),
+        ('OT Payment: Weekday-night Rate 200%', 2.0),
+        ('OT Payment: Weekend Rate 200%', 2.0),
+        ('OT Payment: Weekend-night Rate 270%', 2.7),
+        ('OT Payment: Holiday Rate 300%', 3.0),
+        ('OT Payment: Holiday-night Rate 390%', 3.9),
+    ]
+
+    for idx, row in df.iterrows():
+        used = row.get('Lieu used', 0)
+        if not pd.isna(used) and used > 0:
+            remaining_lieu = used
+            for col, ratio in priority_order:
+                available = df.at[idx, col] if col in df.columns else 0.0
+                try:
+                    available = float(available)
+                except:
+                    continue
+                deduct = round(remaining_lieu / ratio, 3)
+                if available >= deduct:
+                    df.at[idx, col] = round(available - deduct, 3)
+                    break
+                else:
+                    remaining_lieu = round(remaining_lieu - available * ratio, 3)
+                    df.at[idx, col] = 0.0
+    # >>> END
 
     # Ensure 'Lieu used' and 'Remark' columns exist before reordering
     if 'Lieu used' not in df.columns:
-        df['Lieu used'] = ''
+        df['Lieu used'] = np.nan
     if 'Remark' not in df.columns:
-        df['Remark'] = ''
+        df['Remark'] = np.nan
     cols = [c for c in df.columns if c not in ['Lieu used', 'Remark']] + ['Lieu used', 'Remark']
     df = df[cols]
     rows = df.fillna('').astype(str).values.tolist()
     return jsonify({'columns': cols, 'data': rows})
+
 
 @app.route('/get_otlieu_report')
 def get_otlieu_report():
@@ -1322,6 +1455,7 @@ def get_otlieu_report():
         emp_df = pd.DataFrame(columns=["Name", "ID Number"])
     emp_df = emp_df.fillna('')
     emp_df['No'] = range(1, len(emp_df) + 1)
+    
     # Đọc OT Lieu Before
     path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
     if os.path.exists(path):
