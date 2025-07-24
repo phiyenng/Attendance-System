@@ -435,41 +435,6 @@ def process_ot_lieu_df(df, employee_list_df):
                     df.at[idx, lieu_date_col] = mark_gray(row[lieu_date_col])
     return df
 
-# def is_holiday(check_date):
-#     """
-#     Check if date is a holiday based on 'Holiday Date In This Year'
-#     """
-#     global rules
-#     if rules is None or rules.empty or 'Holiday Date in This Year' not in rules.columns:
-#         return False
-#     # Normalize check_date to date only
-#     check_date_only = check_date.date() if hasattr(check_date, 'date') else check_date
-#     # Convert all holiday dates to date objects for comparison
-#     holiday_dates = pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date
-#     return check_date_only in set(holiday_dates.dropna())
-
-# def is_special_work_day(check_date):
-#     """
-#     Check if date is a special work day based on 'Special Work Day'
-#     """
-#     global rules
-#     if rules is None or rules.empty or 'Special Work Day' not in rules.columns:
-#         return False
-#     check_date_only = check_date.date() if hasattr(check_date, 'date') else check_date
-#     special_work_dates = pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date
-#     return check_date_only in set(special_work_dates.dropna())
-
-# def get_day_type(check_date):
-#     """Get day type (Weekday/Weekend)"""
-#     if is_special_work_day(check_date):
-#         return "Weekday"
-    
-#     weekday = check_date.weekday()
-#     if weekday < 5:  # Monday to Friday
-#         return "Weekday"
-#     else:
-#         return "Weekend"
-
 # ========================
 # UPLOAD & SAVE EXCEL
 # ========================
@@ -982,6 +947,7 @@ def update_otlieu_row():
                     real = round(diff, 2)
                     ot_lieu_data.at[idx, sum_ot_col] = real
                     updated[sum_ot_col] = real
+
             # Lieu
             if col in lieu_from_cols + lieu_to_cols and sum_lieu_col:
                 lieu_from = ot_lieu_data.at[idx, lieu_from_cols[0]]
@@ -998,6 +964,12 @@ def update_otlieu_row():
                     real = round(diff, 2)
                     ot_lieu_data.at[idx, sum_lieu_col] = real
                     updated[sum_lieu_col] = real
+
+            # thêm sau khi chỉnh sửa
+            temp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+            flat_df = ot_lieu_data.applymap(flatten_cell)
+            flat_df.to_excel(temp_path, index=False)
+
             return jsonify({'success': True, 'updated': updated})
         else:
             return jsonify({'error': 'Invalid index or column'}), 400
@@ -1013,10 +985,8 @@ def get_apply_column_options():
     if apply_data is not None and not apply_data.empty and 'Leave Type' in apply_data.columns:
         leave_type_values = [v for v in apply_data['Leave Type'].unique() if str(v).strip() != '']
     leave_type_all = default_leave_type + [v for v in leave_type_values if v not in default_leave_type]
-    return jsonify({
-        "Type": default_type,
-        "Leave Type": leave_type_all
-    })
+    
+    return jsonify({"Type": default_type, "Leave Type": leave_type_all})
 
 def get_holidays_from_rules():
     global rules
@@ -1157,7 +1127,6 @@ LIEU_FOLLOWUP_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xl
 @app.route('/get_lieu_followup')
 def get_lieu_followup():
     if not os.path.exists(LIEU_FOLLOWUP_PATH):
-        # Nếu chưa có file, tạo file mặc định từ employee_list
         if employee_list_df is not None and not employee_list_df.empty:
             df = employee_list_df[['Name']].copy()
             df['Lieu remain previous month'] = 0
@@ -1257,40 +1226,58 @@ def get_otlieu_before():
     if not os.path.exists(path):
         return jsonify({'columns': [], 'data': []})
     df = pd.read_excel(path)
-    # Các cột kết quả cần thêm
-    ot_types = [
-        ('Weekday Rate 150%', 1.5),
-        ('Weekday-night Rate 200%', 2.0),
-        ('Weekend Rate 200%', 2.0),
-        ('Weekend-night Rate 270%', 2.7),
-        ('Holiday Rate 300%', 3.0),
-        ('Holiday-night Rate 390%', 3.9),
+    # Tách riêng thứ tự các cột OT Payment và Change in lieu
+    ot_payment_types = [
+        'Weekday Rate 150%',
+        'Weekday-night Rate 200%',
+        'Weekend Rate 200%',
+        'Weekend-night Rate 270%',
+        'Holiday Rate 300%',
+        'Holiday-night Rate 390%',
     ]
-    # Thêm cột OT Payment (nền xanh) và Change in lieu (nền vàng)
-    for col, _ in ot_types:
+    change_in_lieu_types = [
+        'Weekday Rate 150%',
+        'Weekend Rate 200%',
+        'Holiday Rate 300%',
+        'Weekday-night Rate 200%',
+        'Weekend-night Rate 270%',
+        'Holiday-night Rate 390%',
+    ]
+    # Thêm cột OT Payment
+    for col in ot_payment_types:
         df['OT Payment: ' + col] = 0.0
+    # Thêm cột Change in lieu
+    for col in change_in_lieu_types:
         df['Change in lieu: ' + col] = 0.0
     # Hàm xác định loại ngày
-    def get_day_type(dt, holidays, special_workdays):
+    def get_day_type(dt, holidays, special_weekends, special_workdays):
         if dt in holidays:
             return 'Holiday'
         if dt in special_workdays:
             return 'Weekday'
+        if dt in special_weekends:
+            return 'Weekend'
         if dt.weekday() >= 5:
             return 'Weekend'
         return 'Weekday'
     # Lấy ngày nghỉ/làm đặc biệt từ rules
     holidays = set()
     special_workdays = set()
+    special_weekends = set()
     try:
         if rules is not None:
             if 'Holiday Date in This Year' in rules.columns:
                 holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
             if 'Special Work Day' in rules.columns:
                 special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+            if 'Special Weekend' in rules.columns:
+                special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
     except: pass
     # Xử lý từng dòng OT Lieu
     for idx, row in df.iterrows():
+        emp_id = row['Emp ID'] if 'Emp ID' in row else None
+        # BỎ kiểm tra is_no_pay, chỉ kiểm tra Intern
+        intern = is_intern(emp_id, employee_list_df)
         # Lấy ngày OT (ưu tiên OT Day, hoặc Lieu Date, hoặc Start Date)
         ot_date = None
         for col in df.columns:
@@ -1324,17 +1311,13 @@ def get_otlieu_before():
         if t2 < t1:
             t2 = t2 + pd.Timedelta(days=1)
         # Tính block ngày/đêm
-        blocks = []
         cur = t1
         while cur < t2:
-            # Xác định block hiện tại
             hour = cur.hour + cur.minute/60
             if 6 <= hour < 22:
-                # OT ngày: kết thúc block là 22:00 hoặc t2
                 block_end = min(cur.replace(hour=22, minute=0), t2)
                 block_type = 'day'
             else:
-                # OT đêm: kết thúc block là 6:00 hôm sau hoặc t2
                 if hour < 6:
                     next6 = cur.replace(hour=6, minute=0)
                     if next6 <= cur: next6 += pd.Timedelta(days=1)
@@ -1346,75 +1329,285 @@ def get_otlieu_before():
                 block_type = 'night'
             # Xác định loại ngày cho block
             block_date = (ot_date if cur.day == t1.day else ot_date + pd.Timedelta(days=1))
-            day_type = get_day_type(block_date, holidays, special_workdays)
+            day_type = get_day_type(block_date, holidays, special_weekends, special_workdays)
             # Tính số giờ block
             hours = (block_end - cur).total_seconds() / 3600
-            # Trừ 1.5h nếu block ngày và block giao với 12:00-13:30
+            # Trừ giờ trưa nếu block ngày giao với 12:00-13:30
             if block_type == 'day':
                 lunch_start = cur.replace(hour=12, minute=0)
                 lunch_end = cur.replace(hour=13, minute=30)
                 overlap = max(timedelta(0), min(block_end, lunch_end) - max(cur, lunch_start)).total_seconds() / 3600
                 if overlap > 0:
                     hours -= overlap
-            # Gán vào cột phù hợp
-            if day_type == 'Weekday' and block_type == 'day':
-                df.at[idx, 'OT Payment: Weekday Rate 150%'] += hours
-            if day_type == 'Weekday' and block_type == 'night':
-                df.at[idx, 'OT Payment: Weekday-night Rate 200%'] += hours
-            if day_type == 'Weekend' and block_type == 'day':
-                df.at[idx, 'OT Payment: Weekend Rate 200%'] += hours
-            if day_type == 'Weekend' and block_type == 'night':
-                df.at[idx, 'OT Payment: Weekend-night Rate 270%'] += hours
-            if day_type == 'Holiday' and block_type == 'day':
-                df.at[idx, 'OT Payment: Holiday Rate 300%'] += hours
-            if day_type == 'Holiday' and block_type == 'night':
-                df.at[idx, 'OT Payment: Holiday-night Rate 390%'] += hours
-            # Change in lieu: copy logic, có thể điều chỉnh sau
-            if day_type == 'Weekday' and block_type == 'day':
-                df.at[idx, 'Change in lieu: Weekday Rate 150%'] += hours
-            if day_type == 'Weekday' and block_type == 'night':
-                df.at[idx, 'Change in lieu: Weekday-night Rate 200%'] += hours
-            if day_type == 'Weekend' and block_type == 'day':
-                df.at[idx, 'Change in lieu: Weekend Rate 200%'] += hours
-            if day_type == 'Weekend' and block_type == 'night':
-                df.at[idx, 'Change in lieu: Weekend-night Rate 270%'] += hours
-            if day_type == 'Holiday' and block_type == 'day':
-                df.at[idx, 'Change in lieu: Holiday Rate 300%'] += hours
-            if day_type == 'Holiday' and block_type == 'night':
-                df.at[idx, 'Change in lieu: Holiday-night Rate 390%'] += hours
+            # Cộng vào đúng nhóm cột
+            if intern:
+                # Chỉ cộng vào Change in Lieu
+                if day_type == 'Weekday' and block_type == 'day':
+                    df.at[idx, 'Change in lieu: Weekday Rate 150%'] += hours
+                if day_type == 'Weekday' and block_type == 'night':
+                    df.at[idx, 'Change in lieu: Weekday-night Rate 200%'] += hours
+                if day_type == 'Weekend' and block_type == 'day':
+                    df.at[idx, 'Change in lieu: Weekend Rate 200%'] += hours
+                if day_type == 'Weekend' and block_type == 'night':
+                    df.at[idx, 'Change in lieu: Weekend-night Rate 270%'] += hours
+                if day_type == 'Holiday' and block_type == 'day':
+                    df.at[idx, 'Change in lieu: Holiday Rate 300%'] += hours
+                if day_type == 'Holiday' and block_type == 'night':
+                    df.at[idx, 'Change in lieu: Holiday-night Rate 390%'] += hours
+            else:
+                # Chỉ cộng vào OT Payment
+                if day_type == 'Weekday' and block_type == 'day':
+                    df.at[idx, 'OT Payment: Weekday Rate 150%'] += hours
+                if day_type == 'Weekday' and block_type == 'night':
+                    df.at[idx, 'OT Payment: Weekday-night Rate 200%'] += hours
+                if day_type == 'Weekend' and block_type == 'day':
+                    df.at[idx, 'OT Payment: Weekend Rate 200%'] += hours
+                if day_type == 'Weekend' and block_type == 'night':
+                    df.at[idx, 'OT Payment: Weekend-night Rate 270%'] += hours
+                if day_type == 'Holiday' and block_type == 'day':
+                    df.at[idx, 'OT Payment: Holiday Rate 300%'] += hours
+                if day_type == 'Holiday' and block_type == 'night':
+                    df.at[idx, 'OT Payment: Holiday-night Rate 390%'] += hours
             cur = block_end
-    # Trả về
-    cols = list(df.columns)
-    rows = df.fillna('').astype(str).values.tolist()
-    # Đổi tên cột cho đúng format frontend
-    payment_cols = [c for c in df.columns if c.startswith('OT Payment: ')]
-    lieu_cols = [c for c in df.columns if c.startswith('Change in lieu: ')]
-    # Đổi tên
-    rename_map = {}
-    for c in payment_cols:
-        rename_map[c] = c.replace('OT Payment: ', '')
-    for c in lieu_cols:
-        rename_map[c] = c.replace('Change in lieu: ', '')
-    df = df.rename(columns=rename_map)
-    # Đảm bảo thứ tự: các cột gốc, payment, lieu, Lieu used, Remark
-    base_cols = [c for c in df.columns if c not in rename_map.values() and not c.startswith('Change in lieu: ') and not c.startswith('OT Payment: ')]
-    payment_cols_new = [c.replace('OT Payment: ', '') for c in payment_cols]
-    lieu_cols_new = [c.replace('Change in lieu: ', '') for c in lieu_cols]
-    # Thêm Lieu used, Remark nếu chưa có
-    if 'Lieu used' not in df.columns:
-        df['Lieu used'] = ''
-    if 'Remark' not in df.columns:
-        df['Remark'] = ''
-    col_order = base_cols + payment_cols_new + lieu_cols_new + ['Lieu used', 'Remark']
-    df = df[[c for c in col_order if c in df.columns]]
-    cols = list(df.columns)
+    # Sau khi tính toán xong, làm tròn các cột OT Payment và Change in lieu đến 3 chữ số thập phân
+    payment_cols_new = ['OT Payment: ' + c for c in ot_payment_types]
+    lieu_cols_new = ['Change in lieu: ' + c for c in change_in_lieu_types]
+    for col in payment_cols_new + lieu_cols_new:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: round(float(x), 3) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else x)
+
+    df['Lieu used'] = ''
+    df['Remark'] = ''
+    cols = [c for c in df.columns if c not in ['Lieu used', 'Remark']] + ['Lieu used', 'Remark']
+    df = df[cols]
     rows = df.fillna('').astype(str).values.tolist()
     return jsonify({'columns': cols, 'data': rows})
+
+@app.route('/get_otlieu_report')
+def get_otlieu_report():
+    # Đọc danh sách nhân viên
+    emp_path = EMPLOYEE_LIST_PATH
+    if os.path.exists(emp_path):
+        emp_df = pd.read_csv(emp_path, dtype=str)
+    else:
+        emp_df = pd.DataFrame(columns=["Name", "ID Number"])
+    emp_df = emp_df.fillna('')
+    emp_df['No'] = range(1, len(emp_df) + 1)
+    # Đọc OT Lieu Before
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+    if os.path.exists(path):
+        ot_df = pd.read_excel(path)
+    else:
+        ot_df = pd.DataFrame()
+    # Các cột OT cần tổng hợp (theo ảnh)
+    ot_cols = [
+        'OT Payment: Weekday Rate 150%',
+        'OT Payment: Weekday-night Rate 200%',
+        'OT Payment: Weekend Rate 200%',
+        'OT Payment: Weekend-night Rate 270%',
+        'OT Payment: Holiday Rate 300%',
+        'OT Payment: Holiday-night Rate 390%',
+        'Change in lieu: Weekday Rate 150%',
+        'Change in lieu: Weekday-night Rate 200%',
+        'Change in lieu: Weekend Rate 200%',
+        'Change in lieu: Weekend-night Rate 270%',
+        'Change in lieu: Holiday Rate 300%',
+        'Change in lieu: Holiday-night Rate 390%',
+    ]
+    # Group by ID Number, sum các cột OT
+    ot_sum = None
+    if not ot_df.empty and 'Emp ID' in ot_df.columns:
+        ot_sum = ot_df.groupby('Emp ID')[ot_cols].sum().reset_index()
+    # Merge vào danh sách nhân viên
+    result = emp_df[['No', 'ID Number', 'Name']].copy()
+    result = result.rename(columns={'ID Number': 'Employee ID', 'Name': 'Employee Name'})
+    if ot_sum is not None:
+        result = result.merge(ot_sum, left_on='Employee ID', right_on='Emp ID', how='left')
+        result = result.drop(columns=['Emp ID'])
+    # Đổi tên cột cho thân thiện
+    col_rename = {
+        'OT Payment: Weekday Rate 150%': 'OT weekday 150%',
+        'OT Payment: Weekday-night Rate 200%': 'OT weekday night 200%',
+        'OT Payment: Weekend Rate 200%': 'OT weekly holiday 200%',
+        'OT Payment: Weekend-night Rate 270%': 'OT weekly holiday night 270%',
+        'OT Payment: Holiday Rate 300%': 'OT public holiday 300%',
+        'OT Payment: Holiday-night Rate 390%': 'OT public holiday night 390%',
+        'Change in lieu: Weekday Rate 150%': 'OT weekday 150% (lieu)',
+        'Change in lieu: Weekday-night Rate 200%': 'OT weekday night 200% (lieu)',
+        'Change in lieu: Weekend Rate 200%': 'OT weekly holiday 200% (lieu)',
+        'Change in lieu: Weekend-night Rate 270%': 'OT weekly holiday night 270% (lieu)',
+        'Change in lieu: Holiday Rate 300%': 'OT public holiday 300% (lieu)',
+        'Change in lieu: Holiday-night Rate 390%': 'OT public holiday night 390% (lieu)',
+    }
+    result = result.rename(columns=col_rename)
+    # Thêm các cột Time off in lieu, Remain unused time off in lieu, Total OT paid... để trống
+    extra_cols = [
+        'Transferred to normal working hours',
+        'Date',
+        'Total used hours in month',
+        'Remain unused time off in lieu',
+        'Total OT paid'
+    ]
+    for c in extra_cols:
+        result[c] = ''
+    # Thứ tự cột đúng mẫu
+    col_order = [
+        'No', 'Employee ID', 'Employee Name',
+        'OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%', 'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%',
+        'OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)', 'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)', 'Transferred to normal working hours',
+        'Date', 'Total used hours in month', 'Remain unused time off in lieu', 'Total OT paid'
+    ]
+    result = result[[c for c in col_order if c in result.columns]]
+    cols = list(result.columns)
+    rows = result.fillna('').astype(str).values.tolist()
+    return jsonify({'columns': cols, 'data': rows})
+
+@app.route('/get_total_attendance_detail')
+def get_total_attendance_detail():
+    emp_path = EMPLOYEE_LIST_PATH
+    if os.path.exists(emp_path):
+        emp_df = pd.read_csv(emp_path, dtype=str)
+    else:
+        emp_df = pd.DataFrame(columns=["Name", "ID Number", "Dept"])
+
+    emp_df = emp_df.fillna('')
+    emp_df['No'] = range(1, len(emp_df) + 1)
+
+    # Đổi tên các cột theo mẫu hiển thị
+    result = emp_df.rename(columns={
+        'ID Number': '14 Digits Employee ID',
+        'Name': "Employee's name",
+        'Dept': 'Group'
+    })
+
+    # Thêm các cột Attendance & Violation mặc định là rỗng (hoặc 0)
+    for col in [
+        'Normal working days',
+        'Annual leave (100% salary)',
+        'Sick leave (50% salary)',
+        'Unpaid leave (0% salary)',
+        'Welfare leave (100% salary)',
+        'Total',
+        'Late/Leave early (mins)',
+        'Late/Leave early (times)',
+        'Forget scanning',
+        'Violation',
+        'Remark',
+        'Attendance for salary payment'
+    ]:
+        result[col] = ''
+
+    # Xác định lại thứ tự cột giống giao diện
+    col_order = [
+        'No',
+        '14 Digits Employee ID',
+        "Employee's name",
+        'Group',
+        'Normal working days',
+        'Annual leave (100% salary)',
+        'Sick leave (50% salary)',
+        'Unpaid leave (0% salary)',
+        'Welfare leave (100% salary)',
+        'Total',
+        'Late/Leave early (mins)',
+        'Late/Leave early (times)',
+        'Forget scanning',
+        'Violation',
+        'Remark',
+        'Attendance for salary payment'
+    ]
+    result = result[[c for c in col_order if c in result.columns]]
+
+    # Chuyển dữ liệu về dạng list để trả ra frontend
+    cols = list(result.columns)
+    rows = result.fillna('').astype(str).values.tolist()
+
+    return jsonify({'columns': cols, 'data': rows})
+
+import random
+@app.route('/get_attendance_report')
+def get_attendance_report():
+    # Lấy tháng/năm từ query string
+    month = int(request.args.get('month', 7))
+    year = int(request.args.get('year', 2024))
+
+    # Lấy danh sách nhân viên từ file employee_list.csv
+    emp_path = EMPLOYEE_LIST_PATH
+    if os.path.exists(emp_path):
+        emp_df = pd.read_csv(emp_path, dtype=str)
+    else:
+        emp_df = pd.DataFrame(columns=["Dept", "Name"])
+
+    # Tạo dãy ngày từ 20 tháng trước đến 19 tháng này
+    if month == 1:
+        prev_month = 12
+        prev_year = year - 1
+    else:
+        prev_month = month - 1
+        prev_year = year
+    start_date = pd.Timestamp(prev_year, prev_month, 20)
+    end_date = pd.Timestamp(year, month, 19)
+    days = pd.date_range(start=start_date, end=end_date, freq='D')
+    day_cols = [d.strftime('%Y-%m-%d') for d in days]
+
+    # Tạo columns
+    columns = ['Department', 'Name'] + day_cols + [
+        'Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'OT', 'Supplement'
+    ]
+
+    # Tạo dữ liệu mẫu cho từng nhân viên
+    rows = []
+    for _, emp in emp_df.iterrows():
+        row = [emp.get('Dept', ''), emp.get('Name', '')]
+        # Mỗi ngày là 2 ca: random trạng thái
+        day_statuses = []
+        for d in days:
+            # Ví dụ: random trạng thái cho demo, bạn thay bằng tính toán thực tế
+            ca_sang = random.choice(['N', 'L', 'T', 'M', 'LS', 'LE', 'OT', 'S', ''])
+            ca_chieu = random.choice(['N', 'L', 'T', 'M', 'LS', 'LE', 'OT', 'S', ''])
+            day_statuses.append([ca_sang, ca_chieu])
+        row.extend(day_statuses)
+        # Tổng hợp: đếm số lần xuất hiện từng loại
+        summary = {'Normal': 0, 'Leave': 0, 'Trip': 0, 'Miss': 0, 'Late/Soon': 0, 'Lieu': 0, 'OT': 0, 'Supplement': 0}
+        for ca in day_statuses:
+            for val in ca:
+                if val == 'N': summary['Normal'] += 1
+                if val == 'L': summary['Leave'] += 1
+                if val == 'T': summary['Trip'] += 1
+                if val == 'M': summary['Miss'] += 1
+                if val == 'LS': summary['Late/Soon'] += 1
+                if val == 'LE': summary['Lieu'] += 1
+                if val == 'OT': summary['OT'] += 1
+                if val == 'S': summary['Supplement'] += 1
+        row.extend([summary['Normal'], summary['Leave'], summary['Trip'], summary['Miss'],
+                    summary['Late/Soon'], summary['Lieu'], summary['OT'], summary['Supplement']])
+        rows.append(row)
+
+    return jsonify({'columns': columns, 'rows': rows})
 
 def flatten_cell(cell):
     if isinstance(cell, dict) and 'value' in cell:
         return cell['value']
     return cell
+
+def get_special_days_from_rules(rules):
+    holidays = set()
+    special_weekends = set()
+    special_workdays = set()
+    if rules is not None:
+        if 'Holiday Date in This Year' in rules.columns:
+            holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
+        if 'Special Weekend' in rules.columns:
+            special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
+        if 'Special Work Day' in rules.columns:
+            special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+    return holidays, special_weekends, special_workdays
+
+def is_intern(emp_id, emp_list_df):
+    if emp_id in emp_list_df['ID Number'].values:
+        emp_row = emp_list_df[emp_list_df['ID Number'] == emp_id].iloc[0]
+        return emp_row.get('Internship', '') == 'Intern'
+    return False
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

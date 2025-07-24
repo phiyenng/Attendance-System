@@ -329,11 +329,28 @@
         .lieu-col {
             background: #fff7b3 !important;
         }
-        .lieu-used-col {
-            background: #e0e0e0 !important;
-        }
-        .remark-col {
+        .timeoff-col {
             background: #b6e7b0 !important;
+        }
+        #otlieuReportTab table th:first-child,
+        #otlieuReportTab table td:first-child {
+            min-width: 40px;
+            max-width: 50px;
+            width: 45px;
+            text-align: center;
+            vertical-align: middle;
+            padding-left: 0;
+            padding-right: 0;
+        }
+        #totalAttendanceDetailTab table th:first-child,
+        #totalAttendanceDetailTab table td:first-child {
+            min-width: 40px;
+            max-width: 50px;
+            width: 45px;
+            text-align: center;
+            vertical-align: middle;
+            padding-left: 0;
+            padding-right: 0;
         }
     </style>
 </head>
@@ -481,6 +498,9 @@
                     <div>
                         <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
                         <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
+                        <button class="btn btn-action btn-success btn-sm ms-2" id="exportAttendanceReportBtn" style="background:#43a047;color:#fff;border:none;">
+                            <i class="fas fa-file-export"></i> Export
+                        </button>
                     </div>
                 </div>
                 <ul class="nav nav-tabs mb-3" id="reportNavTabs">
@@ -491,7 +511,7 @@
                         <a class="nav-link" id="nav-otlieu-report" data-bs-toggle="tab" href="#otlieuReportTab">OT Lieu Report</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" id="nav-total-attendance" data-bs-toggle="tab" href="#totalAttendanceTab">Total Attendance Detail</a>
+                        <a class="nav-link" id="nav-total-attendance" data-bs-toggle="tab" href="#totalAttendanceDetailTab">Total Attendance Detail</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" id="nav-attendance-report" data-bs-toggle="tab" href="#attendanceReportTab">Attendance Report</a>
@@ -503,8 +523,19 @@
                 <div class="tab-content" id="reportTabContent">
                     <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
                     <div class="tab-pane fade" id="otlieuReportTab"> <!-- OT Lieu Report content here --> </div>
-                    <div class="tab-pane fade" id="totalAttendanceTab"> <!-- Total Attendance Detail content here --> </div>
-                    <div class="tab-pane fade" id="attendanceReportTab"> <!-- Attendance Report content here --> </div>
+                    <div class="tab-pane fade" id="totalAttendanceDetailTab"> <!-- Total Attendance Detail content here --> </div>
+                    <div class="tab-pane fade" id="attendanceReportTab">
+                        <div id="attendanceReportHeader" class="d-flex flex-column align-items-center mb-3">
+                            <h2 style="font-weight:bold; text-align:center; margin-bottom:10px;">Monthly Attendance Report</h2>
+                            <div class="d-flex gap-2 align-items-center">
+                                <label for="attendanceMonth" class="form-label mb-0">Month:</label>
+                                <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
+                                <label for="attendanceYear" class="form-label mb-0">Year:</label>
+                                <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
+                            </div>
+                        </div>
+                        <div id="attendanceReportTableContainer"></div>
+                    </div>
                     <div class="tab-pane fade" id="abnormalTab"> <!-- Abnormal content here --> </div>
                 </div>
             </div>
@@ -608,7 +639,7 @@
       </div>
     </div>
 
-    <!-- Save Completed Modal -->
+    <!-- Save Completed Dialog Modal -->
     <div class="modal fade" id="saveCompletedModal" tabindex="-1" aria-labelledby="saveCompletedModalLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -626,7 +657,7 @@
       </div>
     </div>
 
-    <!-- Time Format Warning Modal -->
+    <!-- Time Format Warning Dialog Modal -->
     <div class="modal fade" id="timeFormatWarningModal" tabindex="-1" aria-labelledby="timeFormatWarningModalLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -712,7 +743,7 @@
       </div>
     </div>
 
-    <!-- Modal cảnh báo thiếu dữ liệu -->
+    <!-- Modal Missing Data Dialog -->
     <div class="modal fade" id="missingDataModal" tabindex="-1" aria-labelledby="missingDataModalLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -979,36 +1010,6 @@
             });
         }
 
-        function exportData() {
-            showLoading(true);
-            showAlert('', '');
-
-            fetch('/export')
-            .then(response => {
-                if (response.ok) {
-                    return response.blob();
-                } else {
-                    throw new Error('Export failed');
-                }
-            })
-            .then(blob => {
-                showLoading(false);
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `attendance_report_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.xlsx`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                showAlert('success', 'File exported successfully!');
-            })
-            .catch(error => {
-                showLoading(false);
-                showAlert('danger', 'Error exporting file: ' + error.message);
-            });
-        }
-
         function updateStatus(dataType, count) {
             const statusElement = document.getElementById(`${dataType}Status`);
             const clearBtn = {
@@ -1022,26 +1023,6 @@
             } else {
                 if (clearBtn) clearBtn.classList.add('d-none');
             }
-        }
-
-        function clearAllData() {
-            if (!confirm('Are you sure you want to clear ALL data?')) return;
-            showLoading(true);
-            showAlert('', '');
-            Promise.all([
-                fetch('/clear/signinout', {method: 'POST'}),
-                fetch('/clear/apply', {method: 'POST'}),
-                fetch('/clear/otlieu', {method: 'POST'})
-            ]).then(() => {
-                showLoading(false);
-                showAlert('success', 'All data cleared successfully!');
-                updateStatus('signinout', 0);
-                updateStatus('apply', 0);
-                updateStatus('otlieu', 0);
-            }).catch(() => {
-                showLoading(false);
-                showAlert('danger', 'Error clearing all data.');
-            });
         }
 
         function showLoading(show) {
@@ -1094,6 +1075,7 @@
             if(sectionId==='employeeListSection') reloadEmployeeList();
             if(sectionId==='rulesSection') loadRulesTable();
         }
+        
         // Default to Main
         showSection('mainSection');
 
@@ -1130,6 +1112,8 @@
                 });
         }
         document.getElementById('dataTableSelect').onchange = renderSelectedTable;
+        
+        // --- Render Selected Table ---
         function renderSelectedTable() {
             const type = document.getElementById('dataTableSelect').value;
             if (type === 'signinout') {
@@ -1140,18 +1124,22 @@
                 renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
             }
         }
+        
         // --- Dropdown for Type & Leave Type in Apply Table ---
         let applyColumnOptions = {};
         fetch('/get_apply_column_options').then(res => res.json()).then(data => { applyColumnOptions = data; });
+        
         // --- Scroll position persistence ---
         let lastScrollTop = 0;
         let lastScrollLeft = 0;
+        
         // Enhanced renderTable: highlight new columns if provided
         function renderTable(containerId, columns, rows, highlightCols=[]) {
             const pageSize = 50;
             let currentPage = 1;
             const totalPages = Math.ceil(rows.length / pageSize);
             let editingRow = null;
+            
             function renderPage(page) {
                 const container = document.getElementById(containerId);
                 // Restore scroll position if available
@@ -1435,6 +1423,7 @@
             };
             renderPage(currentPage);
         }
+        
         // EMPLOYEE IMPORT FORM HANDLER
         (function() {
             const importForm = document.getElementById('employeeImportForm');
@@ -1665,6 +1654,7 @@
                 }
             });
         }
+        
         function deleteRuleRow(idx) {
             fetch('/delete_rule_row', {
                 method: 'POST',
@@ -1675,6 +1665,7 @@
                 else alert('Delete failed!');
             });
         }
+        
         function addRuleRow() {
             fetch('/add_rule_row', {method: 'POST'})
                 .then(res => res.json())
@@ -1701,7 +1692,7 @@
             }
         }
 
-        // Thêm hàm chuyển sang trang report khi nhấn nút Report
+        // Go to Report Tab
         function goToReport() {
             // Check OT Lieu data for error/warning cells
             const otlieu = cachedTables.otlieu && cachedTables.otlieu.data ? cachedTables.otlieu.data : [];
@@ -1739,13 +1730,14 @@
                 });
         }
 
-        // Back to Edit: chuyển về mainSection, không refresh lại data
+        // Back to Edit
         if(document.getElementById('backToEditBtn')) {
             document.getElementById('backToEditBtn').onclick = function() {
                 showSection('mainSection');
             };
         }
-        // Review Data: hiện modal popup preview các bảng dữ liệu
+        
+        // Review Data
         if(document.getElementById('reviewDataBtn')) {
             document.getElementById('reviewDataBtn').onclick = function() {
                 var reviewModal = new bootstrap.Modal(document.getElementById('reviewDataModal'));
@@ -1762,7 +1754,7 @@
                 });
             };
         }
-        // Hàm render bảng preview đơn giản
+      
         function renderPreviewTable(containerId, columns, rows) {
             const container = document.getElementById(containerId);
             if (!columns || columns.length === 0) {
@@ -1772,44 +1764,287 @@
             const pageSize = 50;
             let currentPage = 1;
             const totalPages = Math.ceil(rows.length / pageSize);
+
+
             function renderPage(page) {
-                let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
-                columns.forEach(col => {
-                    let thClass = '';
-                    if (containerId === 'otlieuBeforeTab') {
-                        if ([
-                            'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
-                        ].includes(col)) thClass = 'ot-payment-col';
-                        if ([
-                            'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
-                        ].includes(col) && columns.indexOf(col) > columns.indexOf('Holiday-night Rate 390%')) thClass = 'lieu-col';
-                        if (col === 'Lieu used') thClass = 'lieu-used-col';
-                        if (col === 'Remark') thClass = 'remark-col';
+                let html = '<div class="table-responsive"><table class="table table-bordered">';
+
+                // Total Attendance Detail Tab Logic
+                if (containerId === 'totalAttendanceDetailTab') {
+                    const baseCols = [
+                        'No', '14 Digits Employee ID', "Employee's name", 'Group'
+                    ];
+                    const attendanceCols = [
+                        'Normal working days',
+                        'Annual leave (100% salary)',
+                        'Sick leave (50% salary)',
+                        'Unpaid leave (0% salary)',
+                        'Welfare leave (100% salary)'
+                    ];
+                    const violationCols = [
+                        'Total',
+                        'Late/Leave early (mins)',
+                        'Late/Leave early (times)',
+                        'Forget scanning',
+                        'Violation'
+                    ];
+                    const remainCols = [
+                        'Remark',
+                        'Attendance for salary payment'
+                    ];
+
+                    html += '<thead><tr>';
+                    baseCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
+                    html += `<th colspan="5" style="background:#e0f7fa;">Attendance</th>`;
+                    html += `<th colspan="5" style="background:#ffeaea;">Violation</th>`;
+                    remainCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
+                    html += '</tr><tr>';
+                    attendanceCols.forEach(c => html += `<th style="background:#e0f7fa;">${c}</th>`);
+                    violationCols.forEach(c => html += `<th style="background:#ffeaea;">${c}</th>`);
+                    html += '</tr></thead>';
+                }
+                
+                // OT Lieu Report Tab Logic
+                else if (containerId === 'otlieuReportTab') {
+                    // Xác định nhóm cột
+                    const baseCols = ['No', 'Employee ID', 'Employee Name'];
+                    const otPayCols = ['OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%', 'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%'];
+                    const otLieuCols = ['OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)', 'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)', 'Transferred to normal working hours'];
+                    const timeoffCols = ['Date', 'Total used hours in month'];
+                    const remainCols = ['Remain unused time off in lieu', 'Total OT paid'];
+
+                    // Header dòng 1
+                    html += '<thead><tr>';
+                    baseCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
+                    html += `<th colspan="6" class="ot-payment-col">OVERTIME (For payment)</th>`;
+                    html += `<th colspan="7" class="lieu-col">OVERTIME (No pay, For later time in lieu)</th>`;
+                    html += `<th colspan="2" class="timeoff-col">Time off in lieu (hour)</th>`;
+                    remainCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
+                    html += '</tr><tr>';
+                    otPayCols.forEach(c => html += `<th class="ot-payment-col">${c}</th>`);
+                    otLieuCols.forEach(c => html += `<th class="lieu-col">${c}</th>`);
+                    timeoffCols.forEach(c => html += `<th class="timeoff-col">${c}</th>`);
+                    html += '</tr></thead>';
+                }
+                
+                // OT Lieu Before tab logic
+                else if (containerId === 'otlieuBeforeTab') {
+                    // Xác định nhóm cột
+                    // Giả sử: OT Payment là các cột có "OT" hoặc "Payment", Change in Lieu là các cột có "Lieu" hoặc "Change"
+                    const otPaymentCols = [];
+                    const changeInLieuCols = [];
+                    const otherCols = [];
+                    columns.forEach((col, idx) => {
+                        if (col.startsWith('OT Payment: ')) otPaymentCols.push(idx);
+                        else if (col.startsWith('Change in lieu: ')) changeInLieuCols.push(idx);
+                        else otherCols.push(idx);
+                    });
+
+                    // Header dòng 1
+                    html += '<thead><tr>';
+                    // Các cột đầu (nếu có)
+                    if (otherCols.length > 0) {
+                        otherCols.forEach(idx => {
+                            html += `<th rowspan="2">${columns[idx]}</th>`;
+                        });
                     }
-                    html += `<th class="${thClass}">${col}</th>`;
-                });
-                html += '</tr></thead><tbody>';
+                    if (otPaymentCols.length > 0) {
+                        html += `<th colspan="${otPaymentCols.length}" style="background:#b3e0ff;">OT Payment</th>`;
+                    }
+                    if (changeInLieuCols.length > 0) {
+                        html += `<th colspan="${changeInLieuCols.length}" style="background:#fff7b3;">Change in Lieu</th>`;
+                    }
+                    html += '</tr><tr>';
+                    // Dòng 2: tên cột con
+                    // Dòng 2: tên cột con
+                    if (otPaymentCols.length > 0) {
+                        otPaymentCols.forEach(idx => {
+                            html += `<th style="background:#e3f2fd;">${columns[idx].replace('OT Payment: ', '')}</th>`;
+                        });
+                    }
+                    if (changeInLieuCols.length > 0) {
+                        changeInLieuCols.forEach(idx => {
+                            html += `<th style="background:#fffde7;">${columns[idx].replace('Change in lieu: ', '')}</th>`;
+                        });
+                    }
+                    // Thêm 2 cột "Lieu used" và "Remark" nếu có trong columns
+                    const lieuUsedIdx = columns.indexOf('Lieu used');
+                    if (lieuUsedIdx !== -1) {
+                        html += `<th rowspan="2" style="background:#e0e0e0;">Lieu used</th>`;
+                    }
+                    const remarkIdx = columns.indexOf('Remark');
+                    if (remarkIdx !== -1) {
+                        html += `<th rowspan="2" style="background:#b6e7b0;">Remark</th>`;
+                    }
+                    html += '</tr></thead>';
+                    // Body
+                    html += '<tbody>';
+                    const start = (page - 1) * pageSize;
+                    const end = Math.min(start + pageSize, rows.length);
+                    for (let i = start; i < end; i++) {
+                        html += '<tr>';
+                        // Other cols
+                        otherCols.forEach(idx => {
+                            let displayValue = (rows[i][idx] && typeof rows[i][idx] === 'object' && 'value' in rows[i][idx]) ? rows[i][idx].value : rows[i][idx];
+                            html += `<td>${displayValue}</td>`;
+                        });
+            // OT Payment
+            otPaymentCols.forEach(idx => {
+                let displayValue = (rows[i][idx] && typeof rows[i][idx] === 'object' && 'value' in rows[i][idx]) ? rows[i][idx].value : rows[i][idx];
+                if (
+                    displayValue === '' || displayValue === null || displayValue === undefined ||
+                    (typeof displayValue === 'number' && isNaN(displayValue)) ||
+                    parseFloat(displayValue) === 0
+                ) {
+                    displayValue = '-';
+                }
+                html += `<td>${displayValue}</td>`;
+            });
+            // Change in Lieu
+            changeInLieuCols.forEach(idx => {
+                let displayValue = (rows[i][idx] && typeof rows[i][idx] === 'object' && 'value' in rows[i][idx]) ? rows[i][idx].value : rows[i][idx];
+                if (
+                    displayValue === '' || displayValue === null || displayValue === undefined ||
+                    (typeof displayValue === 'number' && isNaN(displayValue)) ||
+                    parseFloat(displayValue) === 0
+                ) {
+                    displayValue = '-';
+                }
+                html += `<td>${displayValue}</td>`;
+            });
+                        html += '</tr>';
+                    }
+                    html += '</tbody></table></div>';
+                    html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
+                    html += `<span>Page ${page} of ${totalPages}</span>`;
+                    html += `<div>`;
+                    html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
+                    html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
+                    html += `</div></div>`;
+                    container.innerHTML = html;
+                    document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
+                        if (currentPage > 1) renderPage(currentPage - 1);
+                    };
+                    document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
+                        if (currentPage < totalPages) renderPage(currentPage + 1);
+                    };
+                    return; // Dừng ở đây, không render các tab khác
+                }
+
+
+                // Attendance Report Tab Logic
+                else if (containerId === 'attendanceReportTab') {
+                    // Giả sử columns = ['Department', 'Name', ...30 ngày..., 'Normal', 'Leave', ...]
+                    // rows = [ [dep, name, ...30 trạng thái..., tổng hợp...], ... ]
+                    // Bạn có thể điều chỉnh lại columns/rows cho phù hợp backend thực tế
+
+                    // Tính số ngày động (giả sử 30 ngày)
+                    const dayStartIdx = 2; // sau Department, Name
+                    const dayEndIdx = columns.length - 8; // 8 cột tổng hợp cuối
+                    const dayCols = columns.slice(dayStartIdx, dayEndIdx);
+
+                    // Header 1
+                    html += `<thead><tr>
+                        <th rowspan="3" style="position:sticky;left:0;z-index:2;background:#fff;">Department</th>
+                        <th rowspan="3" style="position:sticky;left:80px;z-index:2;background:#fff;">Name</th>
+                        <th colspan="${dayCols.length}">Date</th>
+                        <th rowspan="3" style="background:#388e3c;color:#fff;">Normal<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#fbc02d;">Leave<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#b39ddb;">Trip<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#e57373;">Miss<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#29b6f6;">Late/Soon<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#ffd54f;">Lieu<br><span style="font-size:0.8em;">Hours</span></th>
+                        <th rowspan="3" style="background:#ffb74d;">OT<br><span style="font-size:0.8em;">Hours</span></th>
+                        <th rowspan="3" style="background:#4dd0e1;">Supplement<br><span style="font-size:0.8em;">Times</span></th>
+                    </tr><tr>`;
+
+                    // Header 2: thứ trong tuần
+                    dayCols.forEach((col, idx) => {
+                        // col có thể là "2024-07-20" hoặc "20/07" hoặc số ngày, bạn cần chuyển sang thứ
+                        let d = new Date(col); // hoặc parse lại nếu backend trả string ngày
+                        let wd = isNaN(d) ? '' : ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+                        let color = '';
+                        if (wd === 'Sat') color = 'background:#d0f8ce;';
+                        if (wd === 'Sun') color = 'background:#ffcdd2;';
+                        html += `<th style="text-align:center;${color}">${wd}</th>`;
+                    });
+                    html += `</tr><tr>`;
+                    // Header 3: ngày số
+                    dayCols.forEach((col, idx) => {
+                        let d = new Date(col);
+                        let color = '';
+                        if (d.getDay && d.getDay() === 6) color = 'background:#d0f8ce;';
+                        if (d.getDay && d.getDay() === 0) color = 'background:#ffcdd2;';
+                        html += `<th style="text-align:center;${color}">${d.getDate ? d.getDate() : col}</th>`;
+                    });
+                    html += `</tr></thead><tbody>`;
+
+                    // Body: mỗi nhân viên 2 dòng (sáng/chiều)
+                    const start = (page - 1) * pageSize;
+                    const end = Math.min(start + pageSize, rows.length);
+                    for (let i = start; i < end; i++) {
+                        let row = rows[i];
+                        for (let shift = 0; shift < 2; shift++) {
+                            html += `<tr>`;
+                            if (shift === 0) {
+                                html += `<td rowspan="2" style="position:sticky;left:0;z-index:1;background:#fff;vertical-align:middle;text-align:center;">${row[0]}</td>`;
+                                html += `<td rowspan="2" style="position:sticky;left:80px;z-index:1;background:#fff;vertical-align:middle;text-align:center;">${row[1]}</td>`;
+                            }
+                            for (let d = dayStartIdx; d < dayEndIdx; d++) {
+                                let val = row[d] && Array.isArray(row[d]) ? row[d][shift] : '';
+                                let cellColor = '';
+                                if (val === 'L') cellColor = 'background:#fbc02d;';
+                                if (val === 'T') cellColor = 'background:#b39ddb;';
+                                if (val === 'M') cellColor = 'background:#e57373;';
+                                if (val === 'LS') cellColor = 'background:#29b6f6;';
+                                if (val === 'LE') cellColor = 'background:#ffd54f;';
+                                if (val === 'OT') cellColor = 'background:#ffb74d;';
+                                if (val === 'S') cellColor = 'background:#4dd0e1;';
+                                if (val === 'N') cellColor = 'background:#388e3c;color:#fff;';
+                                html += `<td style="text-align:center;${cellColor}">${val||''}</td>`;
+                            }
+                            // Tổng hợp
+                            if (shift === 0) {
+                                for (let d = dayEndIdx; d < columns.length; d++) {
+                                    html += `<td rowspan="2" style="text-align:center;">${row[d]}</td>`;
+                                }
+                            }
+                            html += `</tr>`;
+                        }
+                    }
+                    html += `</tbody></table></div>`;
+                    html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
+                    html += `<span>Page ${page} of ${totalPages}</span>`;
+                    html += `<div>`;
+                    html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
+                    html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
+                    html += `</div></div>`;
+                    container.innerHTML = html;
+                    document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
+                        if (currentPage > 1) renderPage(currentPage - 1);
+                    };
+                    document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
+                        if (currentPage < totalPages) renderPage(currentPage + 1);
+                    };
+                    return; // Dừng ở đây, không render các tab khác
+                }
+
+                else {
+                    html += '<thead><tr>';
+                    columns.forEach(col => html += `<th>${col}</th>`);
+                    html += '</tr></thead>';
+                }
+                
+                html += '<tbody>';
                 const start = (page - 1) * pageSize;
                 const end = Math.min(start + pageSize, rows.length);
                 for (let i = start; i < end; i++) {
                     html += '<tr>';
                     let row = rows[i];
-                    row.forEach((cell, j) => {
-                        let tdClass = '';
-                        const col = columns[j];
-                        if (containerId === 'otlieuBeforeTab') {
-                            if ([
-                                'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
-                            ].includes(col)) tdClass = 'ot-payment-col';
-                            if ([
-                                'Weekday Rate 150%', 'Weekday-night Rate 200%', 'Weekend Rate 200%', 'Weekend-night Rate 270%', 'Holiday Rate 300%', 'Holiday-night Rate 390%'
-                            ].includes(col) && columns.indexOf(col) > columns.indexOf('Holiday-night Rate 390%')) tdClass = 'lieu-col';
-                            if (col === 'Lieu used') tdClass = 'lieu-used-col';
-                            if (col === 'Remark') tdClass = 'remark-col';
-                        }
-                        let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
-                        html += `<td class="${tdClass}">${displayValue}</td>`;
-                    });
+                    for (let j = 0; j < columns.length; j++) {
+                        let displayValue = (row[j] && typeof row[j] === 'object' && 'value' in row[j]) ? row[j].value : row[j];
+                        html += `<td>${displayValue}</td>`;
+                    }
                     html += '</tr>';
                 }
                 html += '</tbody></table></div>';
@@ -1945,6 +2180,65 @@
                 showSection('reportSection');
             };
         }
+
+        // OT Lieu Report tab logic
+        function loadOtlieuReportTab() {
+            const container = document.getElementById('otlieuReportTab');
+            container.innerHTML = '<div class="text-muted">Loading...</div>';
+            fetch('/get_otlieu_report').then(res=>res.json()).then(data => {
+                renderPreviewTable('otlieuReportTab', data.columns, data.data);
+            });
+        }
+        if(document.getElementById('nav-otlieu-report')) {
+            document.getElementById('nav-otlieu-report').addEventListener('shown.bs.tab', loadOtlieuReportTab);
+        }
+
+        // Total Attendance Detail tab logic
+        function loadTotalAttendanceDetailTab() {
+            const container = document.getElementById('totalAttendanceDetailTab');
+            container.innerHTML = '<div class="text-muted">Loading...</div>';
+            fetch('/get_total_attendance_detail').then(res=>res.json()).then(data => {
+                renderPreviewTable('totalAttendanceDetailTab', data.columns, data.data);
+            });
+        }
+        if(document.getElementById('nav-total-attendance')) {
+            document.getElementById('nav-total-attendance').addEventListener('shown.bs.tab',loadTotalAttendanceDetailTab)
+        }
+
+        // Attendance Report Tab Logic
+        function loadAttendanceReportTab() {
+            const monthSel = document.getElementById('attendanceMonth');
+            const yearSel = document.getElementById('attendanceYear');
+            if (monthSel && monthSel.options.length === 0) {
+                for (let m = 1; m <= 12; m++) {
+                    monthSel.innerHTML += `<option value="${m}">${m}</option>`;
+                }
+                const now = new Date();
+                for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
+                    yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+                }
+                monthSel.value = now.getMonth() + 1;
+                yearSel.value = now.getFullYear();
+            }
+            monthSel.onchange = loadAttendanceReportTable;
+            yearSel.onchange = loadAttendanceReportTable;
+            loadAttendanceReportTable();
+        }
+
+        function loadAttendanceReportTable() {
+            const month = document.getElementById('attendanceMonth').value;
+            const year = document.getElementById('attendanceYear').value;
+            fetch(`/get_attendance_report?month=${month}&year=${year}`)
+                .then(res => res.json())
+                .then(data => {
+                    renderPreviewTable('attendanceReportTab', data.columns, data.rows);
+                });
+        }
+
+        if(document.getElementById('nav-attendance-report')) {
+            document.getElementById('nav-attendance-report').addEventListener('shown.bs.tab', loadAttendanceReportTab)
+        }
+
     </script>
 </body>
 </html> 
