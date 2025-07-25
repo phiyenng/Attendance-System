@@ -369,6 +369,13 @@
         <div class="main-container">
             <div class="header">
                 <h1><strong>Attendance Report System</strong></h1>
+                <!-- Dropdown chọn tháng/năm cho Attendance Report -->
+                <div id="attendanceMonthYearContainer" style="display:none; justify-content:center; align-items:center; gap:10px; margin-top:10px;">
+                    <label for="attendanceMonth" class="form-label mb-0">Month:</label>
+                    <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
+                    <label for="attendanceYear" class="form-label mb-0">Year:</label>
+                    <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
+                </div>
             </div>
             <div id="alertContainer"></div>
             <div id="loading" class="loading">
@@ -1071,6 +1078,12 @@
             if(sectionId==='employeeListSection') document.getElementById('navEmployeeList').classList.add('active');
             if(sectionId==='mainSection') document.getElementById('navMain').classList.add('active');
             if(sectionId==='reportSection') document.getElementById('navReport').classList.add('active');
+            // Show/hide month/year dropdown
+            if(sectionId==='reportSection') {
+                document.getElementById('attendanceMonthYearContainer').style.display = 'flex';
+            } else {
+                document.getElementById('attendanceMonthYearContainer').style.display = 'none';
+            }
             // Special: reload employee list if needed
             if(sectionId==='employeeListSection') reloadEmployeeList();
             if(sectionId==='rulesSection') loadRulesTable();
@@ -1149,7 +1162,7 @@
                     container.scrollLeft = lastScrollLeft;
                 }, 0);
 
-                let html = '<div class="table-responsive"><table class="table table-bordered"><thead>';
+                let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr>';
                 html += '<tr>';
                 columns.forEach(col => {
                     if (highlightCols && highlightCols.includes(col)) {
@@ -1158,8 +1171,7 @@
                         html += `<th>${col}</th>`;
                     }
                 });
-                html += '</tr>';
-                html += '</thead><tbody>';
+                html += '</tr></thead><tbody>';
                 const start = (page - 1) * pageSize;
                 const end = Math.min(start + pageSize, rows.length);
                 for (let i = start; i < end; i++) {
@@ -1781,10 +1793,10 @@
                         'Annual leave (100% salary)',
                         'Sick leave (50% salary)',
                         'Unpaid leave (0% salary)',
-                        'Welfare leave (100% salary)'
+                        'Welfare leave (100% salary)',
+                        'Total'
                     ];
                     const violationCols = [
-                        'Total',
                         'Late/Leave early (mins)',
                         'Late/Leave early (times)',
                         'Forget scanning',
@@ -1797,8 +1809,8 @@
 
                     html += '<thead><tr>';
                     baseCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
-                    html += `<th colspan="5" style="background:#e0f7fa;">Attendance</th>`;
-                    html += `<th colspan="5" style="background:#ffeaea;">Violation</th>`;
+                    html += `<th colspan="6" style="background:#e0f7fa;">Attendance</th>`;
+                    html += `<th colspan="4" style="background:#ffeaea;">Violation</th>`;
                     remainCols.forEach(c => html += `<th rowspan="2">${c}</th>`);
                     html += '</tr><tr>';
                     attendanceCols.forEach(c => html += `<th style="background:#e0f7fa;">${c}</th>`);
@@ -2036,6 +2048,69 @@
                     let row = rows[i];
                     for (let j = 0; j < columns.length; j++) {
                         let displayValue = (row[j] && typeof row[j] === 'object' && 'value' in row[j]) ? row[j].value : row[j];
+                        
+                        // Xử lý hiển thị cho Total Attendance Detail tab
+                        if (containerId === 'totalAttendanceDetailTab') {
+                            const colName = columns[j];
+                            // Các cột số cần hiển thị "-" nếu giá trị là 0 hoặc rỗng
+                            const numericCols = [
+                                'Normal working days',
+                                'Annual leave (100% salary)',
+                                'Sick leave (50% salary)',
+                                'Unpaid leave (0% salary)',
+                                'Welfare leave (100% salary)',
+                                'Total',
+                                'Late/Leave early (mins)',
+                                'Late/Leave early (times)',
+                                'Forget scanning',
+                                'Violation',
+                                'Attendance for salary payment'
+                            ];
+                            
+                            if (numericCols.includes(colName)) {
+                                // Kiểm tra nếu giá trị là 0, 0.0, rỗng hoặc null
+                                if (displayValue === '' || displayValue === null || displayValue === undefined ||
+                                    displayValue === '0' || displayValue === '0.0' || 
+                                    (typeof displayValue === 'number' && displayValue === 0)) {
+                                    displayValue = '-';
+                                }
+                            }
+                        }
+                        
+                        // Xử lý hiển thị cho OT Lieu Report tab
+                        else if (containerId === 'otlieuReportTab') {
+                            const colName = columns[j];
+                            // Các cột số cần hiển thị "-" nếu giá trị là 0 hoặc rỗng
+                            const numericCols = [
+                                'OT weekday 150%',
+                                'OT weekday night 200%',
+                                'OT weekly holiday 200%',
+                                'OT weekly holiday night 270%',
+                                'OT public holiday 300%',
+                                'OT public holiday night 390%',
+                                'OT weekday 150% (lieu)',
+                                'OT weekday night 200% (lieu)',
+                                'OT weekly holiday 200% (lieu)',
+                                'OT weekly holiday night 270% (lieu)',
+                                'OT public holiday 300% (lieu)',
+                                'OT public holiday night 390% (lieu)',
+                                'Transferred to normal working hours',
+                                'Date',
+                                'Total used hours in month',
+                                'Remain unused time off in lieu',
+                                'Total OT paid'
+                            ];
+                            
+                            if (numericCols.includes(colName)) {
+                                // Kiểm tra nếu giá trị là 0, 0.0, rỗng hoặc null
+                                if (displayValue === '' || displayValue === null || displayValue === undefined ||
+                                    displayValue === '0' || displayValue === '0.0' || 
+                                    (typeof displayValue === 'number' && displayValue === 0)) {
+                                    displayValue = '-';
+                                }
+                            }
+                        }
+                        
                         html += `<td>${displayValue}</td>`;
                     }
                     html += '</tr>';
@@ -2230,6 +2305,37 @@
 
         if(document.getElementById('nav-attendance-report')) {
             document.getElementById('nav-attendance-report').addEventListener('shown.bs.tab', loadAttendanceReportTab)
+        }
+
+        // Khởi tạo dropdown tháng/năm khi vào report lần đầu
+        let attendanceMonthInit = false;
+        function initAttendanceMonthYearDropdown() {
+            if (attendanceMonthInit) return;
+            const monthSel = document.getElementById('attendanceMonth');
+            const yearSel = document.getElementById('attendanceYear');
+            if (monthSel && monthSel.options.length === 0) {
+                for (let m = 1; m <= 12; m++) {
+                    monthSel.innerHTML += `<option value="${m}">${m}</option>`;
+                }
+                const now = new Date();
+                for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
+                    yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+                }
+                monthSel.value = now.getMonth() + 1;
+                yearSel.value = now.getFullYear();
+            }
+            monthSel.onchange = loadAttendanceReportTab;
+            yearSel.onchange = loadAttendanceReportTab;
+            attendanceMonthInit = true;
+        }
+        // Gọi khi vào reportSection
+        const oldShowSection = showSection;
+        showSection = function(sectionId) {
+            oldShowSection(sectionId);
+            if(sectionId==='reportSection') {
+                initAttendanceMonthYearDropdown();
+                loadAttendanceReportTab();
+            }
         }
 
     </script>

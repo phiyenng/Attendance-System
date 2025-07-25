@@ -16,6 +16,11 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+# Đường dẫn file tạm cho các bảng dữ liệu
+TEMP_SIGNINOUT_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
+TEMP_APPLY_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
+TEMP_OTLIEU_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -1557,8 +1562,8 @@ def get_total_attendance_detail():
         result = result.reset_index(drop=True)
         result['No'] = range(1, len(result) + 1)
 
-    # Thêm các cột Attendance & Violation mặc định là rỗng (hoặc 0)
-    for col in [
+    # Khởi tạo các cột tính toán với giá trị 0
+    attendance_cols = [
         'Normal working days',
         'Annual leave (100% salary)',
         'Sick leave (50% salary)',
@@ -1571,8 +1576,209 @@ def get_total_attendance_detail():
         'Violation',
         'Remark',
         'Attendance for salary payment'
-    ]:
-        result[col] = ''
+    ]
+    for col in attendance_cols:
+        result[col] = 0.0
+
+    # Lấy dữ liệu từ các file tạm
+    signinout_data = []
+    apply_data = []
+    otlieu_data = []
+    
+    if os.path.exists(TEMP_SIGNINOUT_PATH):
+        signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
+        signinout_data = signinout_df.to_dict('records')
+    
+    if os.path.exists(TEMP_APPLY_PATH):
+        apply_df = pd.read_excel(TEMP_APPLY_PATH)
+        apply_data = apply_df.to_dict('records')
+    
+    if os.path.exists(TEMP_OTLIEU_PATH):
+        otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
+        otlieu_data = otlieu_df.to_dict('records')
+
+    # Lấy thông tin ngày đặc biệt từ rules
+    holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
+
+    # Xác định khoảng thời gian tính toán (20 tháng trước đến 19 tháng này)
+    today = datetime.now()
+    if today.day >= 20:
+        # Nếu hôm nay từ ngày 20 trở đi, tính từ 20 tháng trước đến 19 tháng này
+        start_date = today.replace(day=20) - timedelta(days=30)
+        end_date = today.replace(day=19)
+    else:
+        # Nếu hôm nay trước ngày 20, tính từ 20 tháng trước đến 19 tháng trước
+        start_date = today.replace(day=20) - timedelta(days=60)
+        end_date = today.replace(day=19) - timedelta(days=30)
+    
+    # Tạo danh sách ngày trong khoảng thời gian
+    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+
+    # Hàm xác định loại ngày
+    def get_day_type(dt, holidays, special_weekends, special_workdays):
+        dt_date = dt.date()
+        if dt_date in holidays:
+            return 'Holiday'
+        if dt_date in special_workdays:
+            return 'Weekday'
+        if dt_date in special_weekends:
+            return 'Weekend'
+        if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            return 'Weekend'
+        return 'Weekday'
+
+    # Hàm kiểm tra nhân viên có nghỉ Lieu ngày đó không
+    def is_lieu_day(emp_name, check_date, otlieu_data):
+        for record in otlieu_data:
+            name_val = str(record.get('Name', '') or '')
+            if name_val.strip() == emp_name.strip():
+                # Kiểm tra các cột Lieu From, Lieu To
+                lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+                for col in lieu_cols:
+                    if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                        try:
+                            lieu_date = pd.to_datetime(record[col]).date()
+                            if lieu_date == check_date:
+                                return True
+                        except:
+                            continue
+        return False
+
+    # Tính toán cho từng nhân viên
+    for idx, emp in result.iterrows():
+        emp_name = emp["Employee's name"]
+        normal_days = 0
+        annual_leave = 0
+        sick_leave = 0
+        unpaid_leave = 0
+        welfare_leave = 0
+
+        # Tính Normal working days và các loại leave
+        for dt in date_range:
+            day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
+            dt_date = dt.date()
+            
+            # Kiểm tra có nghỉ Lieu không
+            is_lieu = is_lieu_day(emp_name, dt_date, otlieu_data)
+            
+            # Chỉ tính ngày làm việc (Weekday hoặc Special Work Day) và không phải ngày lễ
+            if day_type == 'Weekday' and not is_lieu:
+                normal_days += 1
+
+        # Tính các loại leave từ apply_data
+        for record in apply_data:
+            if (record.get('Name', '').strip() == emp_name.strip() and 
+                record.get('Type') == 'Leave' and 
+                record.get('Results') == 'Approved'):
+                
+                try:
+                    # Xử lý ngày apply (có thể là một ngày hoặc khoảng thời gian)
+                    start_date_str = record.get('Start Date', '')
+                    end_date_str = record.get('End Date', '')
+                    apply_date_str = record.get('Apply Date', '')
+                    
+                    # Sử dụng Start Date nếu có, nếu không thì dùng Apply Date
+                    if start_date_str:
+                        start_date = pd.to_datetime(start_date_str).date()
+                    elif apply_date_str:
+                        start_date = pd.to_datetime(apply_date_str).date()
+                    else:
+                        continue
+                        
+                    end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
+                    
+                    # Duyệt qua từng ngày trong khoảng thời gian
+                    current_date = start_date
+                    while current_date <= end_date:
+                        if current_date in date_range:
+                            day_type = get_day_type(pd.to_datetime(current_date), holidays, special_weekends, special_workdays)
+                            if day_type == 'Weekday':
+                                leave_type = str(record.get('Leave Type', '')).lower()
+                                note = str(record.get('Note', '')).lower()
+                                
+                                # Theo logic VBA: mỗi buổi nghỉ = 0.5 ngày
+                                # Kiểm tra trong Note có chỉ định thời gian nghỉ không
+                                if any(keyword in note for keyword in ['morning', 'sáng', '上午', 'am']):
+                                    leave_days = 0.5  # Nghỉ buổi sáng
+                                elif any(keyword in note for keyword in ['afternoon', 'chiều', '下午', 'pm']):
+                                    leave_days = 0.5  # Nghỉ buổi chiều
+                                elif start_date == end_date:
+                                    leave_days = 1.0  # Nghỉ cả ngày
+                                else:
+                                    leave_days = 1.0  # Nghỉ nhiều ngày, mỗi ngày = 1.0
+                                
+                                if 'annual' in leave_type:
+                                    annual_leave += leave_days
+                                elif 'sick' in leave_type:
+                                    sick_leave += leave_days
+                                elif 'unpaid' in leave_type:
+                                    unpaid_leave += leave_days
+                                elif 'welfare' in leave_type:
+                                    welfare_leave += leave_days
+                        
+                        current_date += timedelta(days=1)
+                except:
+                    continue
+
+        # Tính các cột violation từ signinout_data
+        late_early_mins = 0
+        late_early_times = 0
+        forget_scanning = 0
+        violation = 0
+
+        # Chuẩn bị DataFrame từ signinout_data
+        if signinout_data:
+            df_sign = pd.DataFrame(signinout_data)
+            # Đảm bảo các cột cần thiết
+            if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
+                df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+                df_sign['date'] = df_sign['attendance_time'].dt.date
+            else:
+                df_sign = pd.DataFrame(columns=['Name', 'attendance_time', 'date'])
+        else:
+            df_sign = pd.DataFrame(columns=['Name', 'attendance_time', 'date'])
+
+        for dt in date_range:
+            day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
+            if day_type == 'Weekday':
+                # Lấy tất cả bản ghi của nhân viên này trong ngày dt
+                mask = (df_sign['Name'].astype(str).str.strip() == emp_name.strip()) & (df_sign['date'] == dt.date())
+                day_records = df_sign[mask]
+                if not day_records.empty:
+                    in_time = day_records['attendance_time'].min()
+                    out_time = day_records['attendance_time'].max()
+                    # Đi muộn
+                    if in_time.hour > 8 or (in_time.hour == 8 and in_time.minute > 30):
+                        late_minutes = (in_time.hour - 8) * 60 + (in_time.minute - 30)
+                        late_early_mins += late_minutes
+                        late_early_times += 1
+                    # Về sớm
+                    if out_time.hour < 17 or (out_time.hour == 17 and out_time.minute < 30):
+                        early_minutes = (17 - out_time.hour) * 60 + (30 - out_time.minute)
+                        late_early_mins += early_minutes
+                        late_early_times += 1
+                else:
+                    # Không có bản ghi nào trong ngày => quên quẹt
+                    forget_scanning += 1
+
+        # Cập nhật kết quả
+        result.at[idx, 'Normal working days'] = normal_days
+        result.at[idx, 'Annual leave (100% salary)'] = annual_leave
+        result.at[idx, 'Sick leave (50% salary)'] = sick_leave
+        result.at[idx, 'Unpaid leave (0% salary)'] = unpaid_leave
+        result.at[idx, 'Welfare leave (100% salary)'] = welfare_leave
+        result.at[idx, 'Late/Leave early (mins)'] = late_early_mins
+        result.at[idx, 'Late/Leave early (times)'] = late_early_times
+        result.at[idx, 'Forget scanning'] = forget_scanning
+        result.at[idx, 'Violation'] = violation
+        
+        # Tính Total
+        total_leave = annual_leave + sick_leave + unpaid_leave + welfare_leave
+        result.at[idx, 'Total'] = total_leave
+        
+        # Tính Attendance for salary payment (tổng ngày làm việc + nghỉ phép)
+        attendance_for_salary = normal_days + total_leave
+        result.at[idx, 'Attendance for salary payment'] = attendance_for_salary
 
     # Xác định lại thứ tự cột giống giao diện
     col_order = [
