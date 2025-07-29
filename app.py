@@ -1298,21 +1298,22 @@ def calculate_otlieu_before():
         intern = is_intern(emp_id, employee_list_df)
 
         ot_date = None
-        for col in df.columns:
-            if 'ot' in col.lower() and 'day' in col.lower() and pd.notna(row[col]):
-                try:
-                    ot_date = pd.to_datetime(row[col]).date()
-                    break
-                except:
-                    pass
-        if ot_date is None:
-            for col in df.columns:
-                if 'lieu' in col.lower() and 'date' in col.lower() and pd.notna(row[col]):
-                    try:
-                        ot_date = pd.to_datetime(row[col]).date()
-                        break
-                    except:
-                        pass
+        # Ưu tiên lấy từ cột 'Date', sau đó 'OT date', sau đó 'Lieu Date'
+        if 'Date' in df.columns and pd.notna(row.get('Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Date']).date()
+            except:
+                pass
+        elif 'OT date' in df.columns and pd.notna(row.get('OT date', None)):
+            try:
+                ot_date = pd.to_datetime(row['OT date']).date()
+            except:
+                pass
+        elif 'Lieu Date' in df.columns and pd.notna(row.get('Lieu Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Lieu Date']).date()
+            except:
+                pass
         if ot_date is None:
             continue
 
