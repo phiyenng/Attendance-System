@@ -1293,11 +1293,62 @@ def calculate_otlieu_before():
                 special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
     except: pass
 
+    # --- BẮT ĐẦU LOGIC MỚI CHO LIEU ---
     for idx, row in df.iterrows():
         emp_id = row['Emp ID'] if 'Emp ID' in row else None
         intern = is_intern(emp_id, employee_list_df)
+        
+        # Lấy thông tin Lieu Sum (giờ nghỉ Lieu)
+        lieu_sum_col = next((c for c in df.columns if re.search(r'lieu.*sum', c, re.I)), None)
+        name = row['Name'] if 'Name' in row else None
+        lieu_sum = 0.0
+        if lieu_sum_col and name:
+            try:
+                lieu_sum = float(row[lieu_sum_col]) if pd.notna(row[lieu_sum_col]) and str(row[lieu_sum_col]).strip() != '' else 0.0
+            except:
+                lieu_sum = 0.0
+        # Lấy Lieu Remain cũ
+        lieu_remain_old = lieu_remain_map.get(name, 0.0)
+        lieu_to_deduct = min(lieu_sum, lieu_remain_old) if lieu_sum > 0 else 0.0
+        lieu_used = 0.0
+        lieu_remain_new = lieu_remain_old
+        if lieu_to_deduct > 0:
+            # Thứ tự ưu tiên các cột OT Payment và hệ số
+            ot_priority = [
+                ('OT Payment: Weekday Rate 150%', 1.5, 'Change in lieu: Weekday Rate 150%'),
+                ('OT Payment: Weekday-night Rate 200%', 2.0, 'Change in lieu: Weekday-night Rate 200%'),
+                ('OT Payment: Weekend Rate 200%', 2.0, 'Change in lieu: Weekend Rate 200%'),
+                ('OT Payment: Weekend-night Rate 270%', 2.7, 'Change in lieu: Weekend-night Rate 270%'),
+                ('OT Payment: Holiday Rate 300%', 3.0, 'Change in lieu: Holiday Rate 300%'),
+                ('OT Payment: Holiday-night Rate 390%', 3.9, 'Change in lieu: Holiday-night Rate 390%'),
+            ]
+            remain = lieu_to_deduct
+            for ot_col, ratio, lieu_col in ot_priority:
+                ot_val = row.get(ot_col, 0.0)
+                try:
+                    ot_val = float(ot_val) if pd.notna(ot_val) and str(ot_val).strip() != '' else 0.0
+                except:
+                    ot_val = 0.0
+                if ot_val <= 0 or remain <= 0:
+                    df.at[idx, lieu_col] = 0.0
+                    continue
+                # Số giờ OT có thể dùng để đổi Lieu ở hệ số này
+                max_lieu_from_this = ot_val * ratio
+                lieu_from_this = min(remain, max_lieu_from_this)
+                # Số giờ OT bị trừ = lieu_from_this / ratio
+                ot_deduct = lieu_from_this / ratio
+                # Cập nhật vào DataFrame
+                df.at[idx, ot_col] = round(ot_val - ot_deduct, 3)
+                df.at[idx, lieu_col] = round(lieu_from_this, 3)
+                remain -= lieu_from_this
+                lieu_used += lieu_from_this
+            # Cập nhật Lieu used và Lieu Remain mới
+            lieu_remain_new = round(lieu_remain_old - lieu_used, 3)
+        # Ghi nhận vào DataFrame
+        df.at[idx, 'Lieu used'] = round(lieu_used, 3) if lieu_used else 0.0
+        df.at[idx, 'Lieu Remain (old)'] = round(lieu_remain_old, 3)
+        df.at[idx, 'Lieu Remain (new)'] = round(lieu_remain_new, 3)
 
-        ot_date = None
         # Ưu tiên lấy từ cột 'Date', sau đó 'OT date', sau đó 'Lieu Date'
         if 'Date' in df.columns and pd.notna(row.get('Date', None)):
             try:
@@ -1444,6 +1495,17 @@ def calculate_otlieu_before():
     if 'Remark' not in df.columns:
         df['Remark'] = np.nan
     cols = [c for c in df.columns if c not in ['Lieu used', 'Remark']] + ['Lieu used', 'Remark']
+    df = df[cols]
+
+    if 'Lieu used' not in df.columns:
+        df['Lieu used'] = np.nan
+    if 'Remark' not in df.columns:
+        df['Remark'] = np.nan
+    if 'Lieu Remain (old)' not in df.columns:
+        df['Lieu Remain (old)'] = np.nan
+    if 'Lieu Remain (new)' not in df.columns:
+        df['Lieu Remain (new)'] = np.nan
+    cols = [c for c in df.columns if c not in ['Lieu used', 'Remark', 'Lieu Remain (old)', 'Lieu Remain (new)']] + ['Lieu used', 'Remark', 'Lieu Remain (old)', 'Lieu Remain (new)']
     df = df[cols]
     return df
 
@@ -1897,6 +1959,150 @@ def is_intern(emp_id, emp_list_df):
         emp_row = emp_list_df[emp_list_df['ID Number'] == emp_id].iloc[0]
         return emp_row.get('Internship', '') == 'Intern'
     return False
+
+# ========================
+# MULTI-FILE IMPORT ROUTES
+# ========================
+@app.route('/import_multiple_files', methods=['POST'])
+def import_multiple_files():
+    """Import multiple files for a specific data type with append functionality"""
+    global sign_in_out_data, apply_data, ot_lieu_data, employee_list_df
+    
+    data_type = request.form.get('data_type')
+    if not data_type:
+        return jsonify({'error': 'Data type is required'}), 400
+    
+    if 'files[]' not in request.files:
+        return jsonify({'error': 'No files uploaded'}), 400
+    
+    files = request.files.getlist('files[]')
+    if not files or all(f.filename == '' for f in files):
+        return jsonify({'error': 'No files selected'}), 400
+    
+    total_rows = 0
+    imported_files = []
+    
+    try:
+        for file in files:
+            if file.filename == '':
+                continue
+                
+            if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+                continue
+                
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            
+            # Load data based on file type
+            if file.filename.lower().endswith('.csv'):
+                df = try_read_csv(open(file_path, 'rb').read())
+            elif file.filename.lower().endswith('.xls'):
+                df = pd.read_excel(file_path, engine='xlrd')
+            else:
+                df = pd.read_excel(file_path)
+            
+            df = df.dropna(how='all').fillna('')
+            
+            # Process data based on type
+            if data_type == 'signinout':
+                keep = [col for col in df.columns if col.lower() in ['emp_name', 'attendance_time']]
+                df = df[keep]
+                if sign_in_out_data is None or sign_in_out_data.empty:
+                    sign_in_out_data = df
+                else:
+                    sign_in_out_data = pd.concat([sign_in_out_data, df], ignore_index=True)
+                total_rows = len(sign_in_out_data)
+                
+            elif data_type == 'apply':
+                df = translate_apply_headers(df)
+                df = filter_apply_employees(df, employee_list_df)
+                df = add_apply_columns(df)
+                if apply_data is None or apply_data.empty:
+                    apply_data = df
+                else:
+                    apply_data = pd.concat([apply_data, df], ignore_index=True)
+                total_rows = len(apply_data)
+                
+            elif data_type == 'otlieu':
+                if 'OT From Note: 12AM is midnight' in df.columns:
+                    df = df.rename(columns={'OT From Note: 12AM is midnight': 'OT From'})
+                df = process_ot_lieu_df(df, employee_list_df)
+                if ot_lieu_data is None or ot_lieu_data.empty:
+                    ot_lieu_data = df
+                else:
+                    ot_lieu_data = pd.concat([ot_lieu_data, df], ignore_index=True)
+                total_rows = len(ot_lieu_data)
+            
+            imported_files.append(filename)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully imported {len(imported_files)} files. Total rows: {total_rows}',
+            'imported_files': imported_files,
+            'total_rows': total_rows
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error importing files: {str(e)}'}), 400
+
+@app.route('/remove_file_from_data', methods=['POST'])
+def remove_file_from_data():
+    """Remove specific file data from the current dataset"""
+    global sign_in_out_data, apply_data, ot_lieu_data
+    
+    data_type = request.form.get('data_type')
+    file_index = request.form.get('file_index')
+    
+    if not data_type or file_index is None:
+        return jsonify({'error': 'Data type and file index are required'}), 400
+    
+    try:
+        file_index = int(file_index)
+        
+        # For now, we'll clear all data since we don't track individual files
+        # In a more sophisticated implementation, you could track which rows came from which files
+        if data_type == 'signinout':
+            sign_in_out_data = None
+        elif data_type == 'apply':
+            apply_data = None
+        elif data_type == 'otlieu':
+            ot_lieu_data = None
+        
+        return jsonify({
+            'success': True,
+            'message': f'{data_type.capitalize()} data cleared successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error removing file: {str(e)}'}), 400
+
+@app.route('/get_current_data_info', methods=['GET'])
+def get_current_data_info():
+    """Get information about currently loaded data"""
+    data_type = request.args.get('data_type')
+    
+    if data_type == 'signinout':
+        count = len(sign_in_out_data) if sign_in_out_data is not None else 0
+        data = sign_in_out_data
+    elif data_type == 'apply':
+        count = len(apply_data) if apply_data is not None else 0
+        data = apply_data
+    elif data_type == 'otlieu':
+        count = len(ot_lieu_data) if ot_lieu_data is not None else 0
+        data = ot_lieu_data
+    else:
+        return jsonify({'error': 'Invalid data type'}), 400
+    
+    # Get column information
+    columns = list(data.columns) if data is not None else []
+    
+    return jsonify({
+        'data_type': data_type,
+        'row_count': count,
+        'has_data': count > 0,
+        'columns': columns
+    })
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

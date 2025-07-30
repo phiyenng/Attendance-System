@@ -352,6 +352,77 @@
             padding-left: 0;
             padding-right: 0;
         }
+        
+        /* Multi-file import styles */
+        .file-list-container {
+            max-height: 120px;
+            overflow-y: auto;
+            border: 1px solid #e0e3ea;
+            border-radius: 6px;
+            padding: 8px;
+            background: #f8f9fa;
+            margin-top: 8px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            margin: 2px 0;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            font-size: 0.75rem;
+        }
+        
+        .file-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 8px;
+        }
+        
+        .file-remove-btn {
+            background: none;
+            border: none;
+            color: #dc3545;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            transition: background-color 0.2s;
+        }
+        
+        .file-remove-btn:hover {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .file-upload-btn {
+            background: var(--color-accent);
+            border: none;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            margin-top: 8px;
+            transition: background 0.2s;
+        }
+        
+        .file-upload-btn:hover {
+            background: #1054BE;
+        }
+        
+        .file-upload-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -426,11 +497,12 @@
                                     <i class="fas fa-sign-in-alt"></i> Sign In/Out Data
                                 </div>
                                 <div class="file-input-wrapper">
-                                    <input type="file" id="signinoutFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <input type="file" id="signinoutFile" class="file-input" accept=".xlsx,.xls,.csv" multiple>
                                     <button class="btn upload-btn" onclick="document.getElementById('signinoutFile').click()">
-                                        <i class="fas fa-upload"></i> Choose File
+                                        <i class="fas fa-upload"></i> Choose Files
                                     </button>
                                 </div>
+                                <div id="signinoutFileList" class="mt-2"></div>
                                 <div id="signinoutStatus" class="mt-2 text-muted"></div>
                                 <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearSigninoutBtn" title="Clear Sign In/Out" onclick="clearData('signinout')">
                                     <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
@@ -443,11 +515,12 @@
                                     <i class="fas fa-file-alt"></i> Apply Data
                                 </div>
                                 <div class="file-input-wrapper">
-                                    <input type="file" id="applyFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <input type="file" id="applyFile" class="file-input" accept=".xlsx,.xls,.csv" multiple>
                                     <button class="btn upload-btn" onclick="document.getElementById('applyFile').click()">
-                                        <i class="fas fa-upload"></i> Choose File
+                                        <i class="fas fa-upload"></i> Choose Files
                                     </button>
                                 </div>
+                                <div id="applyFileList" class="mt-2"></div>
                                 <div id="applyStatus" class="mt-2 text-muted"></div>
                                 <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearApplyBtn" title="Clear Apply" onclick="clearData('apply')">
                                     <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
@@ -460,11 +533,12 @@
                                     <i class="fas fa-clock"></i> OT Lieu Data
                                 </div>
                                 <div class="file-input-wrapper">
-                                    <input type="file" id="otlieuFile" class="file-input" accept=".xlsx,.xls,.csv">
+                                    <input type="file" id="otlieuFile" class="file-input" accept=".xlsx,.xls,.csv" multiple>
                                     <button class="btn upload-btn" onclick="document.getElementById('otlieuFile').click()">
-                                        <i class="fas fa-upload"></i> Choose File
+                                        <i class="fas fa-upload"></i> Choose Files
                                     </button>
                                 </div>
+                                <div id="otlieuFileList" class="mt-2"></div>
                                 <div id="otlieuStatus" class="mt-2 text-muted"></div>
                                 <button type="button" class="btn btn-link btn-sm position-absolute top-0 end-0 m-2 p-0 d-none" id="clearOtlieuBtn" title="Clear OT Lieu" onclick="clearData('otlieu')">
                                     <span style="font-size:1.3rem;color:#f47c7c;">&times;</span>
@@ -777,18 +851,177 @@
         let sheetNames = null;
         let sheetModal = new bootstrap.Modal(document.getElementById('sheetPreviewModal'));
         let cachedTables = {signinout: null, apply: null, otlieu: null};
+        
+        // Multi-file import state
+        let selectedFiles = {
+            signinout: [],
+            apply: [],
+            otlieu: []
+        };
 
-        // Override file upload handlers
+        // Override file upload handlers for multi-file selection
         document.getElementById('signinoutFile').addEventListener('change', function(e) {
-            handleFilePreview(e.target.files[0], 'signinout');
+            handleMultiFileSelection(e.target.files, 'signinout');
         });
         document.getElementById('applyFile').addEventListener('change', function(e) {
-            handleFilePreview(e.target.files[0], 'apply');
+            handleMultiFileSelection(e.target.files, 'apply');
         });
         document.getElementById('otlieuFile').addEventListener('change', function(e) {
-            handleFilePreview(e.target.files[0], 'otlieu');
+            handleMultiFileSelection(e.target.files, 'otlieu');
         });
 
+        function handleMultiFileSelection(files, dataType) {
+            if (!files || files.length === 0) return;
+            
+            // Convert FileList to Array and filter valid files
+            const validFiles = Array.from(files).filter(file => 
+                file.name.toLowerCase().endsWith('.xlsx') || 
+                file.name.toLowerCase().endsWith('.xls') || 
+                file.name.toLowerCase().endsWith('.csv')
+            );
+            
+            if (validFiles.length === 0) {
+                showAlert('danger', 'No valid files selected. Please select .xlsx, .xls, or .csv files.');
+                return;
+            }
+            
+            // Add files to selected files list
+            selectedFiles[dataType] = [...selectedFiles[dataType], ...validFiles];
+            
+            // Update file list display
+            updateFileListDisplay(dataType);
+            
+            // Show upload button
+            showUploadButton(dataType);
+            
+            // Show success message for file selection
+            const statusElement = document.getElementById(`${dataType}Status`);
+            const hasExistingData = statusElement && statusElement.innerHTML.trim() !== '';
+            const appendText = hasExistingData ? ' (will append to existing data)' : '';
+            showAlert('success', `${validFiles.length} file(s) selected for ${dataType} data${appendText}`);
+        }
+        
+        function updateFileListDisplay(dataType) {
+            const fileListContainer = document.getElementById(`${dataType}FileList`);
+            const files = selectedFiles[dataType];
+            
+            if (files.length === 0) {
+                fileListContainer.innerHTML = '';
+                return;
+            }
+            
+            let html = '<div class="file-list-container">';
+            html += `<div class="text-muted small mb-2">Selected files (${files.length}):</div>`;
+            files.forEach((file, index) => {
+                const fileSize = (file.size / 1024).toFixed(1); // KB
+                html += `
+                    <div class="file-item">
+                        <div class="d-flex flex-column">
+                            <span class="file-name" title="${file.name}">${file.name}</span>
+                            <small class="text-muted">${fileSize} KB</small>
+                        </div>
+                        <button class="file-remove-btn" onclick="removeFileFromList('${dataType}', ${index})" title="Remove file">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            fileListContainer.innerHTML = html;
+        }
+        
+        function removeFileFromList(dataType, index) {
+            selectedFiles[dataType].splice(index, 1);
+            updateFileListDisplay(dataType);
+            
+            if (selectedFiles[dataType].length === 0) {
+                hideUploadButton(dataType);
+            } else {
+                // Update upload button text
+                showUploadButton(dataType);
+            }
+        }
+        
+        function showUploadButton(dataType) {
+            const fileListContainer = document.getElementById(`${dataType}FileList`);
+            const existingButton = fileListContainer.querySelector('.file-upload-btn');
+            
+            // Check if there's existing data
+            const statusElement = document.getElementById(`${dataType}Status`);
+            const hasExistingData = statusElement && statusElement.innerHTML.trim() !== '';
+            
+            if (!existingButton) {
+                const uploadBtn = document.createElement('button');
+                uploadBtn.className = 'file-upload-btn';
+                const fileCount = selectedFiles[dataType].length;
+                const appendText = hasExistingData ? ' (Append)' : '';
+                uploadBtn.innerHTML = `<i class="fas fa-upload"></i> Import ${fileCount} File${fileCount > 1 ? 's' : ''}${appendText}`;
+                uploadBtn.onclick = () => importMultipleFiles(dataType);
+                fileListContainer.appendChild(uploadBtn);
+            } else {
+                // Update existing button text
+                const fileCount = selectedFiles[dataType].length;
+                const appendText = hasExistingData ? ' (Append)' : '';
+                existingButton.innerHTML = `<i class="fas fa-upload"></i> Import ${fileCount} File${fileCount > 1 ? 's' : ''}${appendText}`;
+            }
+        }
+        
+        function hideUploadButton(dataType) {
+            const fileListContainer = document.getElementById(`${dataType}FileList`);
+            const uploadBtn = fileListContainer.querySelector('.file-upload-btn');
+            if (uploadBtn) {
+                uploadBtn.remove();
+            }
+            
+            // Clear file list display
+            updateFileListDisplay(dataType);
+        }
+        
+        function importMultipleFiles(dataType) {
+            const files = selectedFiles[dataType];
+            if (files.length === 0) return;
+            
+            showLoading(true);
+            showAlert('', '');
+            
+            const formData = new FormData();
+            formData.append('data_type', dataType);
+            files.forEach(file => {
+                formData.append('files[]', file);
+            });
+            
+            fetch('/import_multiple_files', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    const message = data.imported_files.length > 1 ? 
+                        `${data.message} (Files appended to existing data)` :
+                        data.message;
+                    showAlert('success', message);
+                    updateStatus(dataType, data.total_rows);
+                    
+                    // Clear selected files
+                    selectedFiles[dataType] = [];
+                    updateFileListDisplay(dataType);
+                    hideUploadButton(dataType);
+                    
+                    // Reset file input
+                    document.getElementById(`${dataType}File`).value = '';
+                } else {
+                    showAlert('danger', data.error);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showAlert('danger', 'Error importing files: ' + error.message);
+            });
+        }
+        
         function handleFilePreview(file, dataType) {
             if (!file) return;
             pendingFile = file;
@@ -991,6 +1224,12 @@
                 if (data.success) {
                     showAlert('success', data.message);
                     updateStatus(dataType, 0);
+                    
+                    // Clear selected files
+                    selectedFiles[dataType] = [];
+                    updateFileListDisplay(dataType);
+                    hideUploadButton(dataType);
+                    
                     // Reset upload component UI
                     const statusElement = document.getElementById(`${dataType}Status`);
                     if (statusElement) statusElement.innerHTML = '';
@@ -1025,9 +1264,31 @@
                 'otlieu': document.getElementById('clearOtlieuBtn')
             }[dataType];
             if (count > 0) {
-                statusElement.innerHTML = `<i class="fas fa-check text-success"></i> ${count} records loaded`;
+                // Get detailed information about the data
+                fetch(`/get_current_data_info?data_type=${dataType}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.has_data) {
+                            const columnCount = data.columns ? data.columns.length : 0;
+                            statusElement.innerHTML = `
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-check text-success me-2"></i>
+                                    <div>
+                                        <div><strong>${count} records</strong> loaded</div>
+                                        <div class="text-muted small">${columnCount} columns</div>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            statusElement.innerHTML = '';
+                        }
+                    })
+                    .catch(() => {
+                        statusElement.innerHTML = `<i class="fas fa-check text-success"></i> ${count} records loaded`;
+                    });
                 if (clearBtn) clearBtn.classList.remove('d-none');
             } else {
+                statusElement.innerHTML = '';
                 if (clearBtn) clearBtn.classList.add('d-none');
             }
         }
