@@ -1902,42 +1902,61 @@
         }
 
         function updateCellValue(containerId, rowIdx, colIdx, newValue) {
+            console.log('updateCellValue called:', containerId, rowIdx, colIdx, newValue);
+            
             // Determine which data type based on containerId
             let dataType = 'signinout';
             if (containerId.includes('applyTableContainer')) dataType = 'apply';
             else if (containerId.includes('otlieuTableContainer')) dataType = 'otlieu';
             
+            console.log('Data type determined:', dataType);
+            
             // Update the cached data
             if (cachedTables[dataType] && cachedTables[dataType].data) {
+                console.log('Cached data found for:', dataType);
+                
                 // For OT Lieu, handle special cases
                 if (dataType === 'otlieu') {
                     const originalCell = cachedTables[dataType].data[rowIdx][colIdx];
+                    console.log('Original cell:', originalCell);
                     
                     // If it was an error cell with suggest value, and user enters the correct value
                     if (originalCell && typeof originalCell === 'object' && originalCell.error && 
                         originalCell.suggest !== undefined && originalCell.suggest !== null) {
                         
-                                            // Check if user entered the suggested correct value
-                    if (newValue == originalCell.suggest) {
-                        // Replace the error object with the correct value
-                        cachedTables[dataType].data[rowIdx][colIdx] = newValue;
-                        // Refresh table to show the corrected cell
-                        setTimeout(() => refreshCurrentTable(), 100);
-                    } else {
-                        // Keep the error object but update the value
+                        console.log('Processing error cell with suggest value');
+                        // Check if user entered the suggested correct value
+                        if (newValue == originalCell.suggest) {
+                            console.log('User entered correct value, replacing error object');
+                            // Replace the error object with the correct value
+                            cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                            // Refresh table to show the corrected cell
+                            setTimeout(() => refreshCurrentTable(), 100);
+                        } else {
+                            console.log('User entered different value, keeping error object');
+                            // Keep the error object but update the value
+                            cachedTables[dataType].data[rowIdx][colIdx] = {
+                                value: newValue,
+                                error: true,
+                                suggest: originalCell.suggest
+                            };
+                        }
+                    } else if (originalCell && typeof originalCell === 'object' && originalCell.warning) {
+                        console.log('Processing warning cell');
+                        // For warning cells, update the value but keep warning status
                         cachedTables[dataType].data[rowIdx][colIdx] = {
                             value: newValue,
-                            error: true,
-                            suggest: originalCell.suggest
+                            warning: true
                         };
-                    }
                     } else {
+                        console.log('Normal cell update');
                         // Normal update
                         cachedTables[dataType].data[rowIdx][colIdx] = newValue;
                     }
                     
                     console.log('OT Lieu cell updated:', rowIdx, colIdx, newValue);
                 } else {
+                    console.log('Non-OT Lieu cell update');
                     // For other data types, simple update
                     cachedTables[dataType].data[rowIdx][colIdx] = newValue;
                 }
@@ -1967,6 +1986,8 @@
                         }
                     }, 1000);
                 }
+            } else {
+                console.error('No cached data found for:', dataType);
             }
         }
         
