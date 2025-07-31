@@ -4,6 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attendance Report System</title>
+    
+    <!-- Favicon and Browser Tab Icons -->
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon.png') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="shortcut icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='favicon.png') }}">
+    
+    <!-- Meta tags for better browser tab experience -->
+    <meta name="description" content="Modern Attendance Report System - Import, process, and export attendance data with beautiful interface">
+    <meta name="keywords" content="attendance, report, system, employee, management">
+    <meta name="author" content="Attendance Report System">
+    <meta name="theme-color" content="#4195F4">
+    
+    <!-- Open Graph tags for social sharing -->
+    <meta property="og:title" content="Attendance Report System">
+    <meta property="og:description" content="Modern Attendance Report System - Import, process, and export attendance data">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="">
+    <meta property="og:image" content="{{ url_for('static', filename='favicon.ico') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -3344,6 +3364,46 @@
                 loadAttendanceReportTab();
             }
         }
+
+        // Dynamic title and favicon management
+        let originalTitle = document.title;
+        let originalFavicon = document.querySelector('link[rel="icon"]').href;
+        
+        function updatePageTitle(message, type = 'info') {
+            if (message) {
+                const prefix = type === 'error' ? '⚠️ ' : type === 'success' ? '✅ ' : 'ℹ️ ';
+                document.title = `${prefix}${message} - ${originalTitle}`;
+            } else {
+                document.title = originalTitle;
+            }
+        }
+        
+        function updateFavicon(type = 'default') {
+            const faviconLink = document.querySelector('link[rel="icon"]');
+            if (type === 'error') {
+                faviconLink.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%23f44336'/><text x='16' y='22' text-anchor='middle' fill='white' font-size='16' font-weight='bold'>!</text></svg>";
+            } else if (type === 'success') {
+                faviconLink.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%233bb273'/><text x='16' y='22' text-anchor='middle' fill='white' font-size='16' font-weight='bold'>✓</text></svg>";
+            } else {
+                faviconLink.href = originalFavicon;
+            }
+        }
+        
+        // Override showAlert to update title and favicon
+        const originalShowAlert = showAlert;
+        showAlert = function(type, message) {
+            originalShowAlert(type, message);
+            updatePageTitle(message, type);
+            updateFavicon(type);
+            
+            // Reset after 5 seconds
+            if (message) {
+                setTimeout(() => {
+                    updatePageTitle('');
+                    updateFavicon('default');
+                }, 5000);
+            }
+        };
 
         // Export button handler
         document.addEventListener('DOMContentLoaded', function() {

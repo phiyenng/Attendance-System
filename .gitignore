@@ -125,6 +125,13 @@ Thumbs.db
 uploads/*
 !uploads/.gitkeep
 
+# Static files (keep favicon files)
+static/*
+!static/favicon.ico
+!static/favicon.png
+!static/icon.svg
+!static/README.md
+
 # Temporary files
 temp_*.xlsx
 temp_*.xls

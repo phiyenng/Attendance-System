@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="#4195F4" stroke="#1054BE" stroke-width="1"/>
+  
+  <!-- Clock face -->
+  <circle cx="16" cy="16" r="8" fill="white" opacity="0.9"/>
+  <circle cx="16" cy="16" r="8" fill="none" stroke="#4195F4" stroke-width="1"/>
+  
+  <!-- Clock hands -->
+  <!-- Hour hand -->
+  <line x1="16" y1="16" x2="16" y2="10" stroke="#4195F4" stroke-width="2" stroke-linecap="round"/>
+  <!-- Minute hand -->
+  <line x1="16" y1="16" x2="20" y2="16" stroke="#4195F4" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Center dot -->
+  <circle cx="16" cy="16" r="1" fill="#4195F4"/>
+  
+  <!-- Small dots for hours -->
+  <circle cx="16" cy="8" r="0.5" fill="#4195F4"/>
+  <circle cx="24" cy="16" r="0.5" fill="#4195F4"/>
+  <circle cx="16" cy="24" r="0.5" fill="#4195F4"/>
+  <circle cx="8" cy="16" r="0.5" fill="#4195F4"/>
+</svg> 
