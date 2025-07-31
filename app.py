@@ -582,6 +582,10 @@ def calculate_abnormal():
     """Calculate abnormal attendance"""
     global abnormal_data, sign_in_out_data, apply_data, ot_lieu_data
     
+    # Get date range from request
+    start_date = request.form.get('start_date', '')
+    end_date = request.form.get('end_date', '')
+    
     # Save temporary reviewed/edited data for report
     try:
         if sign_in_out_data is not None and not sign_in_out_data.empty:
@@ -606,11 +610,15 @@ def calculate_abnormal():
     # Clear previous abnormal data
     abnormal_data = pd.DataFrame(columns=['Employee', 'Date', 'SignIn', 'SignOut', 'Status', 'LateMinutes'])
     
-    # Calculate attendance
+    # Calculate attendance with date range
     # This function is no longer needed as check_apply and check_lieu are removed.
     # The logic for calculating abnormal attendance needs to be re-evaluated based on the new data structures.
-    # For now, we'll just return a placeholder message.
-    return jsonify({'success': True, 'message': 'Abnormal calculation completed (placeholder).'})
+    # For now, we'll just return a placeholder message with date range info.
+    date_info = ""
+    if start_date and end_date:
+        date_info = f" for period {start_date} to {end_date}"
+    
+    return jsonify({'success': True, 'message': f'Abnormal calculation completed{date_info} (placeholder).'})
 
 @app.route('/get_abnormal_data')
 def get_abnormal_data():
@@ -786,18 +794,61 @@ def employee_list():
     df = employee_list_df.copy()
     if df.empty:
         return Markup('<div class="text-muted">No employees loaded.</div>')
-    html = '<table class="table table-bordered table-sm"><thead><tr>'
+    html = '<table class="table table-bordered table-sm employee-table"><thead><tr>'
     for col in df.columns:
         html += f'<th>{col}</th>'
-    html += '<th>Action</th></tr></thead><tbody>'
+    html += '</tr></thead><tbody>'
     for idx, row in df.iterrows():
         html += '<tr>'
         for col in df.columns:
             html += f'<td>{row[col]}</td>'
-        html += f'<td><button class="btn btn-sm btn-danger" onclick="removeEmployee({idx})">Delete</button></td>'
+        html += f'<td><button class="hover-delete-btn" onclick="removeEmployee({idx})" title="Delete employee">×</button></td>'
         html += '</tr>'
     html += '</tbody></table>'
     return Markup(html)
+
+@app.route('/employee_list_filtered', methods=['GET'])
+def employee_list_filtered():
+    global employee_list_df
+    df = employee_list_df.copy()
+    
+    # Get filter parameters
+    dept_filter = request.args.get('dept', '')
+    intern_filter = request.args.get('intern', '')
+    
+    # Apply filters
+    if dept_filter:
+        df = df[df['Dept'].astype(str).str.contains(dept_filter, case=False, na=False)]
+    
+    if intern_filter:
+        if intern_filter == 'Intern':
+            df = df[df['Internship'].astype(str).str.contains('Intern', case=False, na=False)]
+        elif intern_filter == 'Regular':
+            df = df[~df['Internship'].astype(str).str.contains('Intern', case=False, na=False)]
+    
+    if df.empty:
+        return Markup('<div class="text-muted">No employees match the filter criteria.</div>')
+    
+    html = '<table class="table table-bordered table-sm employee-table"><thead><tr>'
+    for col in df.columns:
+        html += f'<th>{col}</th>'
+    html += '</tr></thead><tbody>'
+    
+    for idx, row in df.iterrows():
+        html += '<tr>'
+        for col in df.columns:
+            html += f'<td>{row[col]}</td>'
+        html += f'<td><button class="hover-delete-btn" onclick="removeEmployee({idx})" title="Delete employee">×</button></td>'
+        html += '</tr>'
+    html += '</tbody></table>'
+    
+    # Add filter summary
+    filter_summary = f'<div class="text-muted small mb-2">Showing {len(df)} of {len(employee_list_df)} employees'
+    if dept_filter or intern_filter:
+        filter_summary += ' (filtered)'
+    filter_summary += '</div>'
+    
+    return Markup(filter_summary + html)
 
 @app.route('/upload_employee_list', methods=['POST'])
 def upload_employee_list():
@@ -2103,6 +2154,61 @@ def get_current_data_info():
         'has_data': count > 0,
         'columns': columns
     })
+
+@app.route('/save_apply_changes', methods=['POST'])
+def save_apply_changes():
+    """Save changes to Apply data"""
+    global apply_data
+    try:
+        data = request.json.get('data', [])
+        if data:
+            # Convert back to DataFrame
+            df = pd.DataFrame(data)
+            apply_data = df
+            # Save to temporary file
+            apply_data.to_excel(TEMP_APPLY_PATH, index=False)
+            return jsonify({'success': True, 'message': 'Apply data saved successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'No data provided'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/save_otlieu_changes', methods=['POST'])
+def save_otlieu_changes():
+    """Save changes to OT Lieu data"""
+    global ot_lieu_data
+    try:
+        data = request.json.get('data', [])
+        if data:
+            # Convert back to DataFrame
+            df = pd.DataFrame(data)
+            ot_lieu_data = df
+            # Save to temporary file
+            ot_lieu_save = ot_lieu_data.applymap(flatten_cell)
+            ot_lieu_save.to_excel(TEMP_OTLIEU_PATH, index=False)
+            return jsonify({'success': True, 'message': 'OT Lieu data saved successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'No data provided'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/save_signinout_changes', methods=['POST'])
+def save_signinout_changes():
+    """Save changes to Sign In/Out data"""
+    global sign_in_out_data
+    try:
+        data = request.json.get('data', [])
+        if data:
+            # Convert back to DataFrame
+            df = pd.DataFrame(data)
+            sign_in_out_data = df
+            # Save to temporary file
+            sign_in_out_data.to_excel(TEMP_SIGNINOUT_PATH, index=False)
+            return jsonify({'success': True, 'message': 'Sign In/Out data saved successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'No data provided'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

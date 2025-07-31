@@ -26,7 +26,7 @@
             --color-muted: #888;
         }
         html {
-            font-size: 11.2px;
+            font-size: 12.2px; /* Increased by +1px */
         }
         body {
             background: var(--color-bg);
@@ -48,7 +48,7 @@
             margin-bottom: 19px;
             color: #111;
             font-weight: bold;
-            font-size: 2rem;
+            font-size: 2.1rem; /* Increased by +1px equivalent */
         }
         .upload-section {
             background: var(--color-card);
@@ -82,7 +82,7 @@
             padding: 5px 14px;
             border-radius: 8px;
             font-weight: 600;
-            font-size: 0.8rem;
+            font-size: 0.85rem; /* Increased by +1px equivalent */
             transition: background 0.2s;
         }
         .upload-btn:hover {
@@ -95,7 +95,7 @@
             margin: 2px;
             border-radius: 7px;
             font-weight: 600;
-            font-size: 0.74rem;
+            font-size: 0.79rem; /* Increased by +1px equivalent */
             padding: 4px 10px;
             transition: background 0.15s, color 0.15s;
             border: none;
@@ -423,6 +423,156 @@
             background: #6c757d;
             cursor: not-allowed;
         }
+        
+        /* Employee List Filter Styles */
+        .filter-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .filter-section:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .filter-section h6 {
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .filter-section .form-label {
+            font-weight: 500;
+            color: #6c757d;
+        }
+        
+        .filter-section .form-control,
+        .filter-section .form-select {
+            border: 1px solid #ced4da;
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+        }
+        
+        .filter-section .form-control:focus,
+        .filter-section .form-select:focus {
+            border-color: #4195F4;
+            box-shadow: 0 0 0 0.2rem rgba(65, 149, 244, 0.25);
+        }
+        
+        .alert-sm {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+            border-radius: 0.375rem;
+        }
+        
+        /* Edit Mode Styles */
+        .edit-mode-active {
+            background-color: #f8f9fa !important;
+            border: 1px solid #dee2e6 !important;
+        }
+        
+        .edit-indicator {
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+        
+        .edit-indicator:hover {
+            opacity: 1;
+        }
+        
+        .table input.form-control-sm {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+        }
+        
+        .table input.form-control-sm:focus {
+            border-color: #4195F4;
+            box-shadow: 0 0 0 0.2rem rgba(65, 149, 244, 0.25);
+        }
+        
+        /* Hover Delete Button Styles */
+        .hover-delete-btn {
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            background: none;
+            border: none;
+            color: #6c757d;
+            font-size: 1.05rem; /* Increased by +1px equivalent */
+            cursor: pointer;
+            padding: 1px 3px;
+            border-radius: 2px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .hover-delete-btn:hover {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        tr:hover .hover-delete-btn {
+            opacity: 1;
+        }
+        
+        /* Employee List Table Column Widths */
+        .employee-table th:nth-child(1), .employee-table td:nth-child(1) {
+            width: 60px; /* STT */
+            min-width: 60px;
+            max-width: 60px;
+        }
+        
+        .employee-table th:nth-child(2), .employee-table td:nth-child(2) {
+            width: 200px; /* Name */
+            min-width: 150px;
+            max-width: 250px;
+        }
+        
+        .employee-table th:nth-child(3), .employee-table td:nth-child(3) {
+            width: 120px; /* ID Number */
+            min-width: 100px;
+            max-width: 140px;
+        }
+        
+        .employee-table th:nth-child(4), .employee-table td:nth-child(4) {
+            width: 100px; /* Dept */
+            min-width: 80px;
+            max-width: 120px;
+        }
+        
+        .employee-table th:nth-child(5), .employee-table td:nth-child(5) {
+            width: 100px; /* Internship */
+            min-width: 80px;
+            max-width: 120px;
+        }
+        
+        .employee-table th:nth-child(6), .employee-table td:nth-child(6) {
+            width: 30px; /* Delete button column */
+            min-width: 30px;
+            max-width: 30px;
+            text-align: center;
+            padding: 0.25rem 0.1rem;
+        }
+        
+        .employee-table {
+            table-layout: fixed;
+            width: 100%;
+        }
+        
+        .employee-table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0.5rem 0.25rem;
+        }
+        
+        .employee-table th {
+            padding: 0.5rem 0.25rem;
+            font-size: 0.925rem; /* Increased by +1px equivalent */
+        }
     </style>
 </head>
 <body>
@@ -482,6 +632,40 @@
                         </select>
                         <button type="submit" class="btn btn-sm btn-success"><i class="fas fa-plus"></i> Add</button>
                     </form>
+                </div>
+                <!-- Filter Section -->
+                <div class="mb-3 p-3 filter-section">
+                    <h6 class="mb-2"><i class="fas fa-filter"></i> Filter Options</h6>
+                    <div class="d-flex flex-wrap gap-3 align-items-end">
+                        <div>
+                            <label for="filterDept" class="form-label small mb-1">Department:</label>
+                            <select id="filterDept" class="form-select form-select-sm" style="width:120px;">
+                                <option value="">All Departments</option>
+                                <option value="Admin">Admin</option>
+                                <option value="E&S">E&S</option>
+                                <option value="Marketing">Marketing</option>
+                                <option value="Sales">Sales</option>
+                                <option value="Support">Support</option>
+                                <option value="Terminal">Terminal</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="filterIntern" class="form-label small mb-1">Intern:</label>
+                            <select id="filterIntern" class="form-select form-select-sm" style="width:100px;">
+                                <option value="">All</option>
+                                <option value="Intern">Intern</option>
+                                <option value="Regular">Regular</option>
+                            </select>
+                        </div>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="applyEmployeeFilter()">
+                                <i class="fas fa-search"></i> Apply Filter
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="clearEmployeeFilter()">
+                                <i class="fas fa-times"></i> Clear
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div id="employeeListContent"></div>
             </div>
@@ -547,6 +731,40 @@
                         </div>
                     </div>
                 </div>
+                <!-- Date Range Filter Section -->
+                <div class="mb-3 p-3 filter-section">
+                    <h6 class="mb-2"><i class="fas fa-calendar-alt"></i> Calculation Date Range</h6>
+                    <div class="d-flex flex-wrap gap-3 align-items-end">
+                        <div>
+                            <label for="dataStartDate" class="form-label small mb-1">Start Date:</label>
+                            <input type="date" id="dataStartDate" class="form-control form-control-sm" style="width:140px;">
+                        </div>
+                        <div>
+                            <label for="dataEndDate" class="form-label small mb-1">End Date:</label>
+                            <input type="date" id="dataEndDate" class="form-control form-control-sm" style="width:140px;">
+                        </div>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="setDefaultDateRange()">
+                                <i class="fas fa-calendar-week"></i> Set Default Range
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="clearDateRange()">
+                                <i class="fas fa-times"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle"></i> 
+                            Default range: 20th of previous month to 19th of current month
+                        </small>
+                        <div id="dateRangeStatus" class="mt-1" style="display:none;">
+                            <small class="text-info">
+                                <i class="fas fa-calendar-check"></i> 
+                                <span id="currentDateRange"></span>
+                            </small>
+                        </div>
+                    </div>
+                </div>
                 <!-- Action Buttons -->
                 <div class="action-buttons mt-3 mb-2">
                     <button class="btn btn-action btn-calculate" id="calculateBtn" onclick="calculateMain()">
@@ -556,17 +774,50 @@
                         <i class="fas fa-chart-bar"></i> Report
                     </button>
                 </div>
-                <!-- Data Table Switcher and Table -->
+                <!-- Data Table Tabs and Table -->
                 <div id="dataTableSwitcherSection" style="display:none;">
-                    <div class="mb-2">
-                        <label for="dataTableSelect" class="form-label">Select Data Table:</label>
-                        <select id="dataTableSelect" class="form-select form-select-sm" style="max-width:200px;display:inline-block;">
-                            <option value="signinout">Sign In/Out</option>
-                            <option value="apply">Apply</option>
-                            <option value="otlieu">OT Lieu</option>
-                        </select>
+                    <ul class="nav nav-tabs mb-3" id="dataNavTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="nav-signinout" data-bs-toggle="tab" href="#signinoutTab">Sign In/Out</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-apply" data-bs-toggle="tab" href="#applyTab">Apply</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-otlieu" data-bs-toggle="tab" href="#otlieuTab">OT Lieu</a>
+                        </li>
+                    </ul>
+                    <!-- Edit Controls -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <button class="btn btn-outline-primary btn-sm me-2" id="editDataBtn" onclick="toggleEditMode()">
+                                <i class="fas fa-edit"></i> Edit Mode
+                            </button>
+                            <button class="btn btn-outline-success btn-sm me-2" id="saveChangesBtn" onclick="saveAllChanges()" style="display:none;">
+                                <i class="fas fa-save"></i> Save Changes
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" id="cancelEditBtn" onclick="cancelEditMode()" style="display:none;">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
+                        </div>
+                        <div>
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle"></i> 
+                                <span id="editModeInfo">Click "Edit Mode" to enable editing</span>
+                            </small>
+                        </div>
                     </div>
-                    <div id="dataTableContainer"></div>
+                    <div class="tab-content" id="dataTabContent">
+                        <div class="tab-pane fade show active" id="signinoutTab">
+                            <div id="signinoutTableContainer"></div>
+                        </div>
+                        <div class="tab-pane fade" id="applyTab">
+                            <div id="applyTableContainer"></div>
+                        </div>
+                        <div class="tab-pane fade" id="otlieuTab">
+                            <div id="otlieuTableContainer"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1346,18 +1597,110 @@
                 document.getElementById('attendanceMonthYearContainer').style.display = 'none';
             }
             // Special: reload employee list if needed
-            if(sectionId==='employeeListSection') reloadEmployeeList();
+            if(sectionId==='employeeListSection') {
+                reloadEmployeeList();
+                // Clear any active filters when switching to employee list section
+                clearEmployeeFilter();
+            }
             if(sectionId==='rulesSection') loadRulesTable();
+            if(sectionId==='mainSection') initializeDateRange();
         }
         
         // Default to Main
         showSection('mainSection');
 
+        // Date Range Functions for Data Tab
+        function setDefaultDateRange() {
+            const today = new Date();
+            let startDate, endDate;
+            
+            if (today.getDate() >= 20) {
+                // Nếu hôm nay từ ngày 20 trở đi, tính từ 20 tháng trước đến 19 tháng này
+                startDate = new Date(today.getFullYear(), today.getMonth() - 1, 20);
+                endDate = new Date(today.getFullYear(), today.getMonth(), 19);
+            } else {
+                // Nếu hôm nay trước ngày 20, tính từ 20 tháng trước đến 19 tháng trước
+                startDate = new Date(today.getFullYear(), today.getMonth() - 2, 20);
+                endDate = new Date(today.getFullYear(), today.getMonth() - 1, 19);
+            }
+            
+            document.getElementById('dataStartDate').value = startDate.toISOString().split('T')[0];
+            document.getElementById('dataEndDate').value = endDate.toISOString().split('T')[0];
+            
+            updateDateRangeStatus();
+        }
+
+        function clearDateRange() {
+            document.getElementById('dataStartDate').value = '';
+            document.getElementById('dataEndDate').value = '';
+            updateDateRangeStatus();
+        }
+
+        function getDateRange() {
+            const startDate = document.getElementById('dataStartDate').value;
+            const endDate = document.getElementById('dataEndDate').value;
+            return { startDate, endDate };
+        }
+
+        function validateDateRange() {
+            const startDate = document.getElementById('dataStartDate').value;
+            const endDate = document.getElementById('dataEndDate').value;
+            
+            if (startDate && endDate && startDate > endDate) {
+                showAlert('danger', 'Start date cannot be later than end date!');
+                return false;
+            }
+            return true;
+        }
+
+        // Auto-set default date range when switching to main section
+        function initializeDateRange() {
+            if (document.getElementById('dataStartDate') && !document.getElementById('dataStartDate').value) {
+                setDefaultDateRange();
+            }
+            updateDateRangeStatus();
+        }
+
+        function updateDateRangeStatus() {
+            const startDate = document.getElementById('dataStartDate').value;
+            const endDate = document.getElementById('dataEndDate').value;
+            const statusDiv = document.getElementById('dateRangeStatus');
+            const statusText = document.getElementById('currentDateRange');
+            
+            if (startDate && endDate) {
+                statusDiv.style.display = 'block';
+                statusText.textContent = `Current range: ${startDate} to ${endDate}`;
+            } else if (startDate || endDate) {
+                statusDiv.style.display = 'block';
+                statusText.textContent = `Partial range: ${startDate || 'Not set'} to ${endDate || 'Not set'}`;
+            } else {
+                statusDiv.style.display = 'none';
+            }
+        }
+
         // Calculate button logic for Main
         function calculateMain() {
             showLoading(true);
             showAlert('', '');
-            fetch('/calculate_abnormal', {method: 'POST'})
+            
+            // Validate date range
+            if (!validateDateRange()) {
+                showLoading(false);
+                return;
+            }
+            
+            // Get date range
+            const dateRange = getDateRange();
+            
+            // Create form data with date range
+            const formData = new FormData();
+            if (dateRange.startDate) formData.append('start_date', dateRange.startDate);
+            if (dateRange.endDate) formData.append('end_date', dateRange.endDate);
+            
+            fetch('/calculate_abnormal', {
+                method: 'POST',
+                body: formData
+            })
                 .then(res => res.json())
                 .then(data => {
                     showLoading(false);
@@ -1374,7 +1717,8 @@
                             cachedTables.otlieu = otlieu;
                             document.getElementById('dataTableSwitcherSection').style.display = '';
                             document.getElementById('reportBtn').style.display = '';
-                            renderSelectedTable();
+                            // Render the first tab (Sign In/Out) by default
+                            renderTable('signinoutTableContainer', cachedTables.signinout.columns, cachedTables.signinout.data);
                         });
                     } else {
                         showAlert('danger', data.error);
@@ -1385,17 +1729,228 @@
                     showAlert('danger', 'Error calculating.');
                 });
         }
-        document.getElementById('dataTableSelect').onchange = renderSelectedTable;
         
-        // --- Render Selected Table ---
-        function renderSelectedTable() {
-            const type = document.getElementById('dataTableSelect').value;
-            if (type === 'signinout') {
-                renderTable('dataTableContainer', cachedTables.signinout.columns, cachedTables.signinout.data);
-            } else if (type === 'apply') {
-                renderTable('dataTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
-            } else if (type === 'otlieu') {
-                renderTable('dataTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+        // --- Data Tab Event Listeners ---
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listeners for data tabs
+            const dataTabs = ['nav-signinout', 'nav-apply', 'nav-otlieu'];
+            dataTabs.forEach(tabId => {
+                const tab = document.getElementById(tabId);
+                if (tab) {
+                    tab.addEventListener('click', function() {
+                        // Small delay to ensure tab is active
+                        setTimeout(() => {
+                            renderActiveDataTable();
+                        }, 100);
+                    });
+                }
+            });
+        });
+        
+        // --- Render Active Data Table ---
+        function renderActiveDataTable() {
+            // Check which tab is active
+            if (document.getElementById('nav-signinout').classList.contains('active')) {
+                renderTable('signinoutTableContainer', cachedTables.signinout.columns, cachedTables.signinout.data);
+            } else if (document.getElementById('nav-apply').classList.contains('active')) {
+                renderTable('applyTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
+            } else if (document.getElementById('nav-otlieu').classList.contains('active')) {
+                renderTable('otlieuTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+            }
+        }
+
+        // --- Edit Mode Functions ---
+        let isEditMode = false;
+        let originalData = {};
+
+        function toggleEditMode() {
+            isEditMode = !isEditMode;
+            updateEditModeUI();
+            
+            if (isEditMode) {
+                // Store original data for potential rollback
+                originalData = {
+                    signinout: JSON.parse(JSON.stringify(cachedTables.signinout)),
+                    apply: JSON.parse(JSON.stringify(cachedTables.apply)),
+                    otlieu: JSON.parse(JSON.stringify(cachedTables.otlieu))
+                };
+                // Re-render current tab with edit mode
+                renderActiveDataTable();
+            } else {
+                // Exit edit mode, re-render without edit mode
+                renderActiveDataTable();
+            }
+        }
+
+        function updateEditModeUI() {
+            const editBtn = document.getElementById('editDataBtn');
+            const saveBtn = document.getElementById('saveChangesBtn');
+            const cancelBtn = document.getElementById('cancelEditBtn');
+            const infoSpan = document.getElementById('editModeInfo');
+            
+            if (isEditMode) {
+                editBtn.innerHTML = '<i class="fas fa-eye"></i> View Mode';
+                editBtn.className = 'btn btn-outline-secondary btn-sm me-2';
+                saveBtn.style.display = 'inline-block';
+                cancelBtn.style.display = 'inline-block';
+                infoSpan.textContent = 'Edit mode enabled - you can now edit cells directly';
+            } else {
+                editBtn.innerHTML = '<i class="fas fa-edit"></i> Edit Mode';
+                editBtn.className = 'btn btn-outline-primary btn-sm me-2';
+                saveBtn.style.display = 'none';
+                cancelBtn.style.display = 'none';
+                infoSpan.textContent = 'Click "Edit Mode" to enable editing';
+            }
+        }
+
+        function saveAllChanges() {
+            showLoading(true);
+            showAlert('', '');
+            
+            // Save changes for each data type
+            const promises = [];
+            
+            // Save Apply data changes
+            if (cachedTables.apply && cachedTables.apply.data) {
+                promises.push(
+                    fetch('/save_apply_changes', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({data: cachedTables.apply.data})
+                    }).then(res => res.json())
+                );
+            }
+            
+            // Save OT Lieu data changes
+            if (cachedTables.otlieu && cachedTables.otlieu.data) {
+                promises.push(
+                    fetch('/save_otlieu_changes', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({data: cachedTables.otlieu.data})
+                    }).then(res => res.json())
+                );
+            }
+            
+            // Save Sign In/Out data changes
+            if (cachedTables.signinout && cachedTables.signinout.data) {
+                promises.push(
+                    fetch('/save_signinout_changes', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({data: cachedTables.signinout.data})
+                    }).then(res => res.json())
+                );
+            }
+            
+            Promise.all(promises)
+                .then(results => {
+                    showLoading(false);
+                    const allSuccess = results.every(r => r.success);
+                    if (allSuccess) {
+                        showAlert('success', 'All changes saved successfully!');
+                        // Exit edit mode
+                        isEditMode = false;
+                        updateEditModeUI();
+                        renderActiveDataTable();
+                    } else {
+                        const errors = results.filter(r => !r.success).map(r => r.error).join(', ');
+                        showAlert('danger', 'Some changes failed to save: ' + errors);
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showAlert('danger', 'Error saving changes: ' + error.message);
+                });
+        }
+
+        function cancelEditMode() {
+            if (confirm('Are you sure you want to cancel all changes? This will revert to the original data.')) {
+                // Restore original data
+                if (originalData.signinout) cachedTables.signinout = originalData.signinout;
+                if (originalData.apply) cachedTables.apply = originalData.apply;
+                if (originalData.otlieu) cachedTables.otlieu = originalData.otlieu;
+                
+                // Exit edit mode
+                isEditMode = false;
+                updateEditModeUI();
+                renderActiveDataTable();
+                
+                showAlert('info', 'Changes cancelled, data restored to original state.');
+            }
+        }
+
+        function refreshCurrentTable() {
+            // Re-render the current active table to reflect changes
+            renderActiveDataTable();
+        }
+
+        function updateCellValue(containerId, rowIdx, colIdx, newValue) {
+            // Determine which data type based on containerId
+            let dataType = 'signinout';
+            if (containerId.includes('applyTableContainer')) dataType = 'apply';
+            else if (containerId.includes('otlieuTableContainer')) dataType = 'otlieu';
+            
+            // Update the cached data
+            if (cachedTables[dataType] && cachedTables[dataType].data) {
+                // For OT Lieu, handle special cases
+                if (dataType === 'otlieu') {
+                    const originalCell = cachedTables[dataType].data[rowIdx][colIdx];
+                    
+                    // If it was an error cell with suggest value, and user enters the correct value
+                    if (originalCell && typeof originalCell === 'object' && originalCell.error && 
+                        originalCell.suggest !== undefined && originalCell.suggest !== null) {
+                        
+                                            // Check if user entered the suggested correct value
+                    if (newValue == originalCell.suggest) {
+                        // Replace the error object with the correct value
+                        cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                        // Refresh table to show the corrected cell
+                        setTimeout(() => refreshCurrentTable(), 100);
+                    } else {
+                        // Keep the error object but update the value
+                        cachedTables[dataType].data[rowIdx][colIdx] = {
+                            value: newValue,
+                            error: true,
+                            suggest: originalCell.suggest
+                        };
+                    }
+                    } else {
+                        // Normal update
+                        cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                    }
+                    
+                    console.log('OT Lieu cell updated:', rowIdx, colIdx, newValue);
+                } else {
+                    // For other data types, simple update
+                    cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                }
+                
+                // Show a small indicator that the cell was updated
+                const cell = document.querySelector(`#${containerId} input[onchange*="${rowIdx}"][onchange*="${colIdx}"]`);
+                if (cell) {
+                    cell.style.borderColor = '#28a745';
+                    cell.style.backgroundColor = '#f8fff9';
+                    setTimeout(() => {
+                        // Restore original styling based on cell type
+                        if (dataType === 'otlieu') {
+                            const originalCell = cachedTables[dataType].data[rowIdx][colIdx];
+                            if (originalCell && typeof originalCell === 'object' && originalCell.error) {
+                                cell.style.borderColor = '#d32f2f';
+                                cell.style.color = '#d32f2f';
+                            } else if (originalCell && typeof originalCell === 'object' && originalCell.warning) {
+                                cell.style.borderColor = '#e6b800';
+                                cell.style.color = '#b38f00';
+                            } else {
+                                cell.style.borderColor = '#ddd';
+                                cell.style.backgroundColor = 'transparent';
+                            }
+                        } else {
+                            cell.style.borderColor = '#ddd';
+                            cell.style.backgroundColor = 'transparent';
+                        }
+                    }, 1000);
+                }
             }
         }
         
@@ -1458,20 +2013,50 @@
                         const tdClass = isMultiline ? 'special-multiline' : '';
                         // --- RED ERROR CELL LOGIC ---
                         if (cell && typeof cell === 'object' && cell.error) {
-                            html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
-                            html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;">`;
-                            if (cell.suggest !== undefined && cell.suggest !== null) {
-                                html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
+                            if (isEditMode) {
+                                // In edit mode, use updateCellValue instead of saveErrorCell
+                                html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
+                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                       style="border:1.5px solid #d32f2f;color:#d32f2f;" 
+                                       onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">`;
+                                if (cell.suggest !== undefined && cell.suggest !== null) {
+                                    html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
+                                }
+                                html += `<div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                    <i class="fas fa-edit"></i>
+                                </div>`;
+                                html += '</td>';
+                            } else {
+                                // Normal mode - use saveErrorCell
+                                html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
+                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;">`;
+                                if (cell.suggest !== undefined && cell.suggest !== null) {
+                                    html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
+                                }
+                                html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)"><i class='fas fa-check'></i></button>`;
+                                html += '</td>';
                             }
-                            html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)"><i class='fas fa-check'></i></button>`;
-                            html += '</td>';
                         } else if (cell && typeof cell === 'object' && cell.warning && ["OT From","OT To","Lieu From","Lieu To","OTSum","LieuSum"].some(cn => col && col.toLowerCase().replace(/\s/g,'') === cn.toLowerCase().replace(/\s/g,''))) {
                             // --- YELLOW WARNING CELL LOGIC ---
-                            html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">`;
-                            html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;">`;
-                            html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)" title="Lưu chỉnh sửa"><i class='fas fa-check'></i></button>`;
-                            html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
-                            html += '</td>';
+                            if (isEditMode) {
+                                // In edit mode, use updateCellValue instead of saveErrorCell
+                                html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">`;
+                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                       style="border:1.5px solid #e6b800;color:#b38f00;" 
+                                       onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">`;
+                                html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
+                                html += `<div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                    <i class="fas fa-edit"></i>
+                                </div>`;
+                                html += '</td>';
+                            } else {
+                                // Normal mode - use saveErrorCell
+                                html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">`;
+                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;">`;
+                                html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)" title="Lưu chỉnh sửa"><i class='fas fa-check'></i></button>`;
+                                html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
+                                html += '</td>';
+                            }
                         } else if (cell && typeof cell === 'object' && cell.gray) {
                             // --- GRAY CELL LOGIC ---
                             html += `<td class="${tdClass}" style="background:#f2f2f2;color:#888;">${displayValue}</td>`;
@@ -1497,6 +2082,61 @@
                                 </select></td>`;
                             } else {
                                 html += `<td class="${tdClass}">${displayValue}</td>`;
+                            }
+                        } else if (isEditMode && !columns.includes('Results')) {
+                            // Edit mode - make cells editable, but preserve OT Lieu logic
+                            if (containerId.includes('otlieuTableContainer')) {
+                                // For OT Lieu, preserve the original logic but make editable
+                                if (cell && typeof cell === 'object' && cell.error) {
+                                    html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">
+                                        <input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                               style="border:1.5px solid #d32f2f;color:#d32f2f;" 
+                                               onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
+                                        ${cell.suggest !== undefined && cell.suggest !== null ? 
+                                            `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>` : ''}
+                                        <div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                            <i class="fas fa-edit"></i>
+                                        </div>
+                                    </td>`;
+                                } else if (cell && typeof cell === 'object' && cell.warning && ["OT From","OT To","Lieu From","Lieu To","OTSum","LieuSum"].some(cn => col && col.toLowerCase().replace(/\s/g,'') === cn.toLowerCase().replace(/\s/g,''))) {
+                                    html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">
+                                        <input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                               style="border:1.5px solid #e6b800;color:#b38f00;" 
+                                               onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
+                                        <div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>
+                                        <div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                            <i class="fas fa-edit"></i>
+                                        </div>
+                                    </td>`;
+                                } else if (cell && typeof cell === 'object' && cell.gray) {
+                                    html += `<td class="${tdClass}" style="background:#f2f2f2;color:#888;position:relative;">
+                                        <input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                               style="border:1px solid #ddd;background:transparent;" 
+                                               onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
+                                        <div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                            <i class="fas fa-edit"></i>
+                                        </div>
+                                    </td>`;
+                                } else {
+                                    html += `<td class="${tdClass}" style="position:relative;">
+                                        <input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                               style="border:1px solid #ddd;background:transparent;" 
+                                               onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
+                                        <div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                            <i class="fas fa-edit"></i>
+                                        </div>
+                                    </td>`;
+                                }
+                            } else {
+                                // For other tables, simple editable cells
+                                html += `<td class="${tdClass}" style="position:relative;">
+                                    <input type="text" class="form-control form-control-sm" value="${displayValue}" 
+                                           style="border:1px solid #ddd;background:transparent;" 
+                                           onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
+                                    <div class="edit-indicator" style="position:absolute;top:2px;right:2px;font-size:0.7em;color:#007bff;">
+                                        <i class="fas fa-edit"></i>
+                                    </div>
+                                </td>`;
                             }
                         } else {
                             html += `<td class="${tdClass}">${displayValue}</td>`;
@@ -1567,10 +2207,25 @@
                         return;
                     }
                 }
-                // Xác định bảng OT Lieu hay Apply
+                // Xác định bảng OT Lieu hay Apply dựa trên containerId
                 let type = 'otlieu';
-                if (containerId.includes('apply')) type = 'apply';
-                // Gửi API update
+                if (containerId.includes('applyTableContainer')) type = 'apply';
+                else if (containerId.includes('signinoutTableContainer')) type = 'signinout';
+                // Gửi API update (chỉ cho apply và otlieu)
+                if (type === 'signinout') {
+                    // Sign In/Out data không có API update, chỉ update cache
+                    cachedTables.signinout.data[rowIdx][colIdx] = newValue;
+                    // Update DOM cell
+                    const allRows = table.querySelectorAll('tbody tr');
+                    if (allRows[rowIdx]) {
+                        const tds = allRows[rowIdx].querySelectorAll('td');
+                        if (tds[colIdx]) {
+                            tds[colIdx].outerHTML = `<td>${newValue}</td>`;
+                        }
+                    }
+                    return;
+                }
+                
                 fetch(type === 'apply' ? '/update_apply_row' : '/update_otlieu_row', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1584,7 +2239,7 @@
                         // Cập nhật cache
                         if (type === 'apply') {
                             cachedTables.apply.data[rowIdx][colIdx] = newValue;
-                        } else {
+                        } else if (type === 'otlieu') {
                             cachedTables.otlieu.data[rowIdx][colIdx] = newValue;
                         }
                         // Update DOM cell
@@ -1592,7 +2247,14 @@
                         if (allRows[rowIdx]) {
                             const tds = allRows[rowIdx].querySelectorAll('td');
                             if (tds[colIdx]) {
-                                let cell = (type === 'apply' ? cachedTables.apply.data[rowIdx][colIdx] : cachedTables.otlieu.data[rowIdx][colIdx]);
+                                let cell;
+                                if (type === 'apply') {
+                                    cell = cachedTables.apply.data[rowIdx][colIdx];
+                                } else if (type === 'otlieu') {
+                                    cell = cachedTables.otlieu.data[rowIdx][colIdx];
+                                } else {
+                                    cell = cachedTables.signinout.data[rowIdx][colIdx];
+                                }
                                 let displayValue = (cell && typeof cell === 'object' && 'value' in cell) ? cell.value : cell;
                                 if (cell && typeof cell === 'object' && cell.error) {
                                     tds[colIdx].outerHTML = `<td style="background:#ffeaea;position:relative;"><input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;"><div style=\"font-size:0.7em;color:#888;\">Correct value: <span style=\"color:#1976d2;font-weight:bold;\">${cell.suggest ?? ''}</span></div><button class=\"btn btn-sm btn-success\" style=\"position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;\"><i class='fas fa-check'></i></button></td>`;
@@ -1732,6 +2394,94 @@
                     document.getElementById('employeeListContent').innerHTML = html;
                 });
         }
+
+        // Employee Filter Functions
+        function applyEmployeeFilter() {
+            const dept = document.getElementById('filterDept').value;
+            const intern = document.getElementById('filterIntern').value;
+            
+            // Build query string
+            const params = new URLSearchParams();
+            if (dept) params.append('dept', dept);
+            if (intern) params.append('intern', intern);
+            
+            // Show loading
+            document.getElementById('employeeListContent').innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div><p class="mt-2">Filtering employees...</p></div>';
+            
+            fetch(`/employee_list_filtered?${params.toString()}`)
+                .then(res => res.text())
+                .then(html => {
+                    document.getElementById('employeeListContent').innerHTML = html;
+                    // Update filter status
+                    updateFilterStatus(dept, intern);
+                })
+                .catch(error => {
+                    console.error('Error applying filter:', error);
+                    document.getElementById('employeeListContent').innerHTML = '<div class="text-danger">Error applying filter. Please try again.</div>';
+                });
+        }
+
+        function updateFilterStatus(dept, intern) {
+            const activeFilters = [];
+            if (dept) activeFilters.push(`Dept: ${dept}`);
+            if (intern) activeFilters.push(`Intern: ${intern}`);
+            
+            // Show active filters if any
+            const filterStatusDiv = document.getElementById('filterStatus');
+            if (activeFilters.length > 0) {
+                if (!filterStatusDiv) {
+                    const statusDiv = document.createElement('div');
+                    statusDiv.id = 'filterStatus';
+                    statusDiv.className = 'alert alert-info alert-sm mb-2';
+                    statusDiv.innerHTML = `<strong>Active Filters:</strong> ${activeFilters.join(', ')}`;
+                    document.getElementById('employeeListContent').insertBefore(statusDiv, document.getElementById('employeeListContent').firstChild);
+                } else {
+                    filterStatusDiv.innerHTML = `<strong>Active Filters:</strong> ${activeFilters.join(', ')}`;
+                }
+            } else if (filterStatusDiv) {
+                filterStatusDiv.remove();
+            }
+        }
+
+        function clearEmployeeFilter() {
+            // Clear all filter inputs
+            document.getElementById('filterDept').value = '';
+            document.getElementById('filterIntern').value = '';
+            
+            // Remove filter status
+            const filterStatusDiv = document.getElementById('filterStatus');
+            if (filterStatusDiv) {
+                filterStatusDiv.remove();
+            }
+            
+            // Reload the full employee list
+            reloadEmployeeList();
+        }
+
+        // Add keyboard shortcuts for filtering
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add Enter key support for filter inputs
+            const filterInputs = ['filterDept', 'filterIntern'];
+            filterInputs.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            applyEmployeeFilter();
+                        }
+                    });
+                }
+            });
+            
+            // Add event listeners for date range inputs
+            const dateInputs = ['dataStartDate', 'dataEndDate'];
+            dateInputs.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('change', updateDateRangeStatus);
+                }
+            });
+        });
         // EMPLOYEE ADD FORM HANDLER
         (function() {
             const addForm = document.getElementById('addEmployeeForm');
