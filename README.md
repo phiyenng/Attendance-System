@@ -94,7 +94,37 @@ Attendance-Record/
 
 ### Supported File Types
 - **Input**: .xlsx, .xls, .csv files
+  - **.xls files**: Now fully supported with fallback engine (xlrd + openpyxl)
+  - **.xlsx files**: Native support with openpyxl
+  - **.csv files**: Standard CSV format support
 - **Output**: .xlsx files with multiple sheets
+
+## Troubleshooting
+
+### File Import Issues
+
+#### .xls File Import Problems
+If you encounter issues importing .xls files:
+
+1. **Check xlrd installation**: Ensure xlrd is installed:
+   ```bash
+   pip install xlrd==2.0.1
+   ```
+
+2. **Fallback mechanism**: The system automatically tries:
+   - First: xlrd engine (best for .xls files)
+   - Second: openpyxl engine (fallback option)
+   - If both fail: Convert file to .xlsx format
+
+3. **Common solutions**:
+   - Convert .xls to .xlsx using Excel or LibreOffice
+   - Ensure file is not corrupted
+   - Check file permissions
+
+#### General Import Issues
+- **File size**: Large files may take time to process
+- **Encoding**: Ensure files use UTF-8 encoding
+- **Format**: Verify file format matches expected structure
 
 ## API Endpoints
 

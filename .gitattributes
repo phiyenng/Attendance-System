@@ -1,2 +1,53 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Python files
+*.py text eol=lf
+
+# HTML files
+*.html text eol=lf
+
+# CSS files
+*.css text eol=lf
+
+# JavaScript files
+*.js text eol=lf
+
+# JSON files
+*.json text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# Configuration files
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# Binary files (should not be modified)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.rar binary
+*.7z binary
+
+# Excel files (binary)
+*.xlsx binary
+*.xls binary
+
+# Ignore temporary Excel files
+~$*.xlsx binary
+~$*.xls binary
+
+# Ignore Excel temporary files
+*.tmp binary
+*.temp binary

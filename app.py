@@ -445,17 +445,41 @@ def process_ot_lieu_df(df, employee_list_df):
 # UPLOAD & SAVE EXCEL
 # ========================
 def load_excel_data(file_path, sheet_name=None):
-    """Load data from Excel file"""
+    """Load data from Excel file with support for .xls and .xlsx"""
     try:
-        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        # Kiểm tra extension của file
+        file_ext = os.path.splitext(file_path)[1].lower()
         
-        if sheet_name:
-            if sheet_name in workbook.sheetnames:
-                df = pd.read_excel(file_path, sheet_name=sheet_name)
-            else:
-                return None
+        if file_ext == '.xls':
+            # Xử lý file .xls
+            try:
+                # Thử với xlrd engine trước
+                if sheet_name:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, engine='xlrd')
+                else:
+                    df = pd.read_excel(file_path, engine='xlrd')
+            except Exception as e:
+                print(f"xlrd engine failed for .xls file: {e}")
+                try:
+                    # Fallback: thử với openpyxl engine
+                    if sheet_name:
+                        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
+                    else:
+                        df = pd.read_excel(file_path, engine='openpyxl')
+                except Exception as e2:
+                    print(f"openpyxl engine also failed for .xls file: {e2}")
+                    raise Exception(f"Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}")
         else:
-            df = pd.read_excel(file_path, sheet_name=workbook.sheetnames[0])
+            # Xử lý file .xlsx
+            workbook = openpyxl.load_workbook(file_path, data_only=True)
+            
+            if sheet_name:
+                if sheet_name in workbook.sheetnames:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                else:
+                    return None
+            else:
+                df = pd.read_excel(file_path, sheet_name=workbook.sheetnames[0])
         
         # Clean the data
         df = df.dropna(how='all')
@@ -500,7 +524,17 @@ def import_signinout():
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
-            df = pd.read_excel(file_path, engine='xlrd')
+            try:
+                # Thử với xlrd engine trước
+                df = pd.read_excel(file_path, engine='xlrd')
+            except Exception as e:
+                print(f"xlrd engine failed: {e}")
+                try:
+                    # Fallback: thử với openpyxl engine
+                    df = pd.read_excel(file_path, engine='openpyxl')
+                except Exception as e2:
+                    print(f"openpyxl engine also failed: {e2}")
+                    return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
         else:
             df = pd.read_excel(file_path)
 
@@ -532,7 +566,17 @@ def import_apply():
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
-            df = pd.read_excel(file_path, engine='xlrd')
+            try:
+                # Thử với xlrd engine trước
+                df = pd.read_excel(file_path, engine='xlrd')
+            except Exception as e:
+                print(f"xlrd engine failed: {e}")
+                try:
+                    # Fallback: thử với openpyxl engine
+                    df = pd.read_excel(file_path, engine='openpyxl')
+                except Exception as e2:
+                    print(f"openpyxl engine also failed: {e2}")
+                    return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
         else:
             df = pd.read_excel(file_path)
         df = translate_apply_headers(df)
@@ -861,7 +905,17 @@ def preview_upload():
     try:
         if ext in ['.xlsx', '.xls']:
             if ext == '.xls':
-                excel = pd.ExcelFile(BytesIO(file_bytes), engine='xlrd')
+                try:
+                    # Thử với xlrd engine trước
+                    excel = pd.ExcelFile(BytesIO(file_bytes), engine='xlrd')
+                except Exception as e:
+                    print(f"xlrd engine failed for .xls preview: {e}")
+                    try:
+                        # Fallback: thử với openpyxl engine
+                        excel = pd.ExcelFile(BytesIO(file_bytes), engine='openpyxl')
+                    except Exception as e2:
+                        print(f"openpyxl engine also failed for .xls preview: {e2}")
+                        return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
             else:
                 excel = pd.ExcelFile(BytesIO(file_bytes))
             sheet_names = excel.sheet_names
@@ -901,7 +955,17 @@ def import_with_sheet():
     try:
         if ext in ['.xlsx', '.xls']:
             if ext == '.xls':
-                df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine='xlrd')
+                try:
+                    # Thử với xlrd engine trước
+                    df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine='xlrd')
+                except Exception as e:
+                    print(f"xlrd engine failed for .xls import: {e}")
+                    try:
+                        # Fallback: thử với openpyxl engine
+                        df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine='openpyxl')
+                    except Exception as e2:
+                        print(f"openpyxl engine also failed for .xls import: {e2}")
+                        return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
             else:
                 df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name)
         elif ext == '.csv':
@@ -2553,7 +2617,17 @@ def import_multiple_files():
             if file.filename.lower().endswith('.csv'):
                 df = try_read_csv(open(file_path, 'rb').read())
             elif file.filename.lower().endswith('.xls'):
-                df = pd.read_excel(file_path, engine='xlrd')
+                try:
+                    # Thử với xlrd engine trước
+                    df = pd.read_excel(file_path, engine='xlrd')
+                except Exception as e:
+                    print(f"xlrd engine failed for .xls multiple import: {e}")
+                    try:
+                        # Fallback: thử với openpyxl engine
+                        df = pd.read_excel(file_path, engine='openpyxl')
+                    except Exception as e2:
+                        print(f"openpyxl engine also failed for .xls multiple import: {e2}")
+                        return jsonify({'error': f'Cannot read .xls file {filename}. Please convert to .xlsx format. Error: {str(e)}'}), 400
             else:
                 df = pd.read_excel(file_path)
             
