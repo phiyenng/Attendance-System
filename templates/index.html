@@ -799,7 +799,7 @@
                             <button class="btn btn-outline-secondary btn-sm" id="cancelEditBtn" onclick="cancelEditMode()" style="display:none;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
-                        </div>
+                    </div>
                         <div>
                             <small class="text-muted">
                                 <i class="fas fa-info-circle"></i> 
@@ -848,9 +848,6 @@
                     <li class="nav-item">
                         <a class="nav-link" id="nav-attendance-report" data-bs-toggle="tab" href="#attendanceReportTab">Attendance Report</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" id="nav-abnormal" data-bs-toggle="tab" href="#abnormalTab">Abnormal</a>
-                    </li>
                 </ul>
                 <div class="tab-content" id="reportTabContent">
                     <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
@@ -868,7 +865,6 @@
                         </div>
                         <div id="attendanceReportTableContainer"></div>
                     </div>
-                    <div class="tab-pane fade" id="abnormalTab"> <!-- Abnormal content here --> </div>
                 </div>
             </div>
 
@@ -2028,13 +2024,13 @@
                                 html += '</td>';
                             } else {
                                 // Normal mode - use saveErrorCell
-                                html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
-                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;">`;
-                                if (cell.suggest !== undefined && cell.suggest !== null) {
-                                    html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
-                                }
-                                html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)"><i class='fas fa-check'></i></button>`;
-                                html += '</td>';
+                            html += `<td class="${tdClass}" style="background:#ffeaea;position:relative;">`;
+                            html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #d32f2f;color:#d32f2f;display:inline-block;width:70px;">`;
+                            if (cell.suggest !== undefined && cell.suggest !== null) {
+                                html += `<div style="font-size:0.7em;color:#888;">Correct value: <span style="color:#1976d2;font-weight:bold;">${cell.suggest}</span></div>`;
+                            }
+                            html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)"><i class='fas fa-check'></i></button>`;
+                            html += '</td>';
                             }
                         } else if (cell && typeof cell === 'object' && cell.warning && ["OT From","OT To","Lieu From","Lieu To","OTSum","LieuSum"].some(cn => col && col.toLowerCase().replace(/\s/g,'') === cn.toLowerCase().replace(/\s/g,''))) {
                             // --- YELLOW WARNING CELL LOGIC ---
@@ -2051,11 +2047,11 @@
                                 html += '</td>';
                             } else {
                                 // Normal mode - use saveErrorCell
-                                html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">`;
-                                html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;">`;
-                                html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)" title="Lưu chỉnh sửa"><i class='fas fa-check'></i></button>`;
-                                html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
-                                html += '</td>';
+                            html += `<td class="${tdClass}" style="background:#fffbe6;position:relative;">`;
+                            html += `<input type="text" class="form-control form-control-sm" value="${displayValue}" style="border:1.5px solid #e6b800;color:#b38f00;display:inline-block;width:90px;">`;
+                            html += `<button class="btn btn-sm btn-success" style="position:absolute;right:2px;top:2px;font-size:0.7em;padding:1px 6px;" onclick="saveErrorCell('${containerId}',${realIdx},${j},this)" title="Lưu chỉnh sửa"><i class='fas fa-check'></i></button>`;
+                            html += `<div style='font-size:0.7em;color:#b38f00;margin-top:2px;'>Format: <b>HH:MM</b></div>`;
+                            html += '</td>';
                             }
                         } else if (cell && typeof cell === 'object' && cell.gray) {
                             // --- GRAY CELL LOGIC ---
@@ -2739,19 +2735,8 @@
                 otlieuModal.show();
                 return;
             }
-            // Optionally: save/export data before switching tab (call /export to save)
-            showLoading(true);
-            fetch('/export')
-                .then(response => {
-                    showLoading(false);
-                    if (!response.ok) throw new Error('Failed to save data before report');
-                    // Switch to report tab
-                    showSection('reportSection');
-                })
-                .catch(() => {
-                    showLoading(false);
-                    showAlert('danger', 'Failed to save data before report.');
-                });
+            // Switch to report tab directly
+            showSection('reportSection');
         }
 
         // Back to Edit
@@ -3119,6 +3104,14 @@
                                     (typeof displayValue === 'number' && displayValue === 0)) {
                                     displayValue = '-';
                                 }
+                                
+                                // Highlight cho cột "Total OT paid" khi > 25
+                                if (colName === 'Total OT paid' && displayValue !== '-') {
+                                    const otValue = parseFloat(displayValue);
+                                    if (!isNaN(otValue) && otValue > 25) {
+                                        displayValue = `<span style="background-color: #ffebee; color: #d32f2f; font-weight: bold; padding: 2px 6px; border-radius: 3px; border: 1px solid #d32f2f;">${displayValue}</span>`;
+                                    }
+                                }
                             }
                         }
                         
@@ -3348,6 +3341,45 @@
                 loadAttendanceReportTab();
             }
         }
+
+        // Export button handler
+        document.addEventListener('DOMContentLoaded', function() {
+            const exportBtn = document.getElementById('exportAttendanceReportBtn');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', function() {
+                    showLoading(true);
+                    showAlert('', '');
+                    
+                    fetch('/export')
+                        .then(response => {
+                            showLoading(false);
+                            if (!response.ok) {
+                                throw new Error('Export failed');
+                            }
+                            return response.blob();
+                        })
+                        .then(blob => {
+                            // Create download link
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.style.display = 'none';
+                            a.href = url;
+                            a.download = `AttendanceReport_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.xlsx`;
+                            document.body.appendChild(a);
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                            document.body.removeChild(a);
+                            
+                            showAlert('success', 'Export completed successfully!');
+                        })
+                        .catch(error => {
+                            showLoading(false);
+                            console.error('Export error:', error);
+                            showAlert('danger', 'Export failed. Please try again.');
+                        });
+                });
+            }
+        });
 
     </script>
 </body>
