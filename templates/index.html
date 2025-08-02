@@ -297,18 +297,28 @@
             opacity: 1;
         }
         .table th, .table td {
-            min-width: 90px;
-            max-width: 180px;
+            min-width: 70px;
+            max-width: 140px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        
+        /* Cho phép tiêu đề xuống hàng */
+        .table th {
+            white-space: normal !important;
+            word-wrap: break-word;
+            word-break: break-word;
+            line-height: 1.2;
+            vertical-align: middle;
+            padding: 6px 4px;
         }
         /* Loại bỏ ellipsis cho các cột đặc biệt, cho phép xuống dòng */
         .table th.special-multiline, .table td.special-multiline {
             white-space: normal !important;
             overflow: visible !important;
             text-overflow: initial !important;
-            max-width: 350px;
+            max-width: 250px;
         }
         /* Employee List STT column nhỏ và căn giữa */
         #employeeListContent table th:first-child, #employeeListContent table td:first-child {
@@ -319,9 +329,9 @@
         }
         /* Special Rules Table: thu nhỏ và căn giữa các cột */
         .special-rules-table th, .special-rules-table td {
-            min-width: 120px;
-            max-width: 180px;
-            width: 140px;
+            min-width: 100px;
+            max-width: 150px;
+            width: 120px;
             text-align: center;
         }
         /* Special Rules Table: thu nhỏ và căn giữa các cột, ưu tiên cao */
@@ -593,6 +603,62 @@
             padding: 0.5rem 0.25rem;
             font-size: 0.925rem; /* Increased by +1px equivalent */
         }
+        
+        /* Report Loading Screen */
+        .report-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            border: 1px solid #e0e3ea;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        
+        .report-loading .spinner-border {
+            width: 3rem;
+            height: 3rem;
+            margin-bottom: 1.5rem;
+            color: var(--color-accent);
+        }
+        
+        .report-loading .loading-text {
+            font-size: 1.2rem;
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .report-loading .loading-subtext {
+            font-size: 0.95rem;
+            color: #6c757d;
+            text-align: center;
+            max-width: 300px;
+        }
+        
+        .report-loading .loading-progress {
+            width: 200px;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+        
+        .report-loading .loading-progress-bar {
+            height: 100%;
+            background: var(--color-accent);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            animation: loading-pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes loading-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
     </style>
 </head>
 <body>
@@ -843,47 +909,62 @@
 
             <!-- Report Section -->
             <div id="reportSection" style="display:none;">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <div>
-                        <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
+                <!-- Report Loading Screen -->
+                <div id="reportLoadingScreen" class="report-loading" style="display:none;">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
                     </div>
-                    <div>
-                        <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
-                        <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
-                        <button class="btn btn-action btn-success btn-sm ms-2" id="exportAttendanceReportBtn" style="background:#43a047;color:#fff;border:none;">
-                            <i class="fas fa-file-export"></i> Export
-                        </button>
+                    <div class="loading-text">Loading Reports...</div>
+                    <div class="loading-subtext">Please wait while we prepare your data</div>
+                    <div class="loading-progress">
+                        <div class="loading-progress-bar" style="width: 0%"></div>
                     </div>
                 </div>
-                <ul class="nav nav-tabs mb-3" id="reportNavTabs">
-                    <li class="nav-item">
-                        <a class="nav-link active" id="nav-otlieu-before" data-bs-toggle="tab" href="#otlieuBeforeTab">OT Lieu Before</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" id="nav-otlieu-report" data-bs-toggle="tab" href="#otlieuReportTab">OT Lieu Report</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" id="nav-total-attendance" data-bs-toggle="tab" href="#totalAttendanceDetailTab">Total Attendance Detail</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" id="nav-attendance-report" data-bs-toggle="tab" href="#attendanceReportTab">Attendance Report</a>
-                    </li>
-                </ul>
-                <div class="tab-content" id="reportTabContent">
-                    <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
-                    <div class="tab-pane fade" id="otlieuReportTab"> <!-- OT Lieu Report content here --> </div>
-                    <div class="tab-pane fade" id="totalAttendanceDetailTab"> <!-- Total Attendance Detail content here --> </div>
-                    <div class="tab-pane fade" id="attendanceReportTab">
-                        <div id="attendanceReportHeader" class="d-flex flex-column align-items-center mb-3">
-                            <h2 style="font-weight:bold; text-align:center; margin-bottom:10px;">Monthly Attendance Report</h2>
-                            <div class="d-flex gap-2 align-items-center">
-                                <label for="attendanceMonth" class="form-label mb-0">Month:</label>
-                                <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
-                                <label for="attendanceYear" class="form-label mb-0">Year:</label>
-                                <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
-                            </div>
+                
+                <!-- Report Content (hidden initially) -->
+                <div id="reportContent" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
                         </div>
-                        <div id="attendanceReportTableContainer"></div>
+                        <div>
+                            <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
+                            <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
+                            <button class="btn btn-action btn-success btn-sm ms-2" id="exportAttendanceReportBtn" style="background:#43a047;color:#fff;border:none;">
+                                <i class="fas fa-file-export"></i> Export
+                            </button>
+                        </div>
+                    </div>
+                    <ul class="nav nav-tabs mb-3" id="reportNavTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="nav-otlieu-before" data-bs-toggle="tab" href="#otlieuBeforeTab">OT Lieu Before</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-otlieu-report" data-bs-toggle="tab" href="#otlieuReportTab">OT Lieu Report</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-total-attendance" data-bs-toggle="tab" href="#totalAttendanceDetailTab">Total Attendance Detail</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-attendance-report" data-bs-toggle="tab" href="#attendanceReportTab">Attendance Report</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="reportTabContent">
+                        <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
+                        <div class="tab-pane fade" id="otlieuReportTab"> <!-- OT Lieu Report content here --> </div>
+                        <div class="tab-pane fade" id="totalAttendanceDetailTab"> <!-- Total Attendance Detail content here --> </div>
+                        <div class="tab-pane fade" id="attendanceReportTab">
+                            <div id="attendanceReportHeader" class="d-flex flex-column align-items-center mb-3">
+                                <h2 style="font-weight:bold; text-align:center; margin-bottom:10px;">Monthly Attendance Report</h2>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <label for="attendanceMonth" class="form-label mb-0">Month:</label>
+                                    <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
+                                    <label for="attendanceYear" class="form-label mb-0">Year:</label>
+                                    <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
+                                </div>
+                            </div>
+                            <div id="attendanceReportTableContainer"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1609,6 +1690,7 @@
             // Show/hide month/year dropdown
             if(sectionId==='reportSection') {
                 document.getElementById('attendanceMonthYearContainer').style.display = 'flex';
+                // Không cần gọi showReportLoading ở đây vì đã được gọi trong onclick của navReport
             } else {
                 document.getElementById('attendanceMonthYearContainer').style.display = 'none';
             }
@@ -2776,8 +2858,9 @@
                 otlieuModal.show();
                 return;
             }
-            // Switch to report tab directly
+            // Switch to report tab directly with loading
             showSection('reportSection');
+            showReportLoading();
         }
 
         // Back to Edit
@@ -3270,10 +3353,14 @@
         // OT Lieu Before tab logic
         function loadOtlieuBeforeTab() {
             const container = document.getElementById('otlieuBeforeTab');
-            container.innerHTML = '<div class="text-muted">Loading...</div>';
-            fetch('/get_otlieu_before').then(res=>res.json()).then(data => {
-                renderPreviewTable('otlieuBeforeTab', data.columns, data.data);
-            });
+            if (window.reportData && window.reportData.otlieuBefore) {
+                renderPreviewTable('otlieuBeforeTab', window.reportData.otlieuBefore.columns, window.reportData.otlieuBefore.data);
+            } else {
+                container.innerHTML = '<div class="text-muted">Loading...</div>';
+                fetch('/get_otlieu_before').then(res=>res.json()).then(data => {
+                    renderPreviewTable('otlieuBeforeTab', data.columns, data.data);
+                });
+            }
         }
         // Gọi khi chuyển tab OT Lieu Before
         if(document.getElementById('nav-otlieu-before')) {
@@ -3292,18 +3379,91 @@
                     modal.show();
                     return false;
                 }
-                // Nếu đủ dữ liệu thì cho chuyển tab
+                // Nếu đủ dữ liệu thì cho chuyển tab và hiển thị loading
                 showSection('reportSection');
+                showReportLoading();
             };
+        }
+        
+        // Hiển thị loading screen cho Report
+        function showReportLoading() {
+            document.getElementById('reportLoadingScreen').style.display = 'flex';
+            document.getElementById('reportContent').style.display = 'none';
+            
+            // Reset progress bar
+            const progressBar = document.querySelector('.loading-progress-bar');
+            progressBar.style.width = '0%';
+            
+            // Load tất cả dữ liệu report cần thiết
+            const currentMonth = new Date().getMonth() + 1;
+            const currentYear = new Date().getFullYear();
+            
+            // Tạo array các promises với progress tracking
+            const promises = [
+                fetch('/get_otlieu_before').then(res => res.json()),
+                fetch('/get_otlieu_report').then(res => res.json()),
+                fetch('/get_total_attendance_detail').then(res => res.json()),
+                fetch('/get_attendance_report?month=' + currentMonth + '&year=' + currentYear).then(res => res.json())
+            ];
+            
+            let completedCount = 0;
+            const totalCount = promises.length;
+            
+            // Wrap each promise to track progress
+            const trackedPromises = promises.map((promise, index) => {
+                return promise.then(result => {
+                    completedCount++;
+                    const progress = (completedCount / totalCount) * 100;
+                    progressBar.style.width = progress + '%';
+                    return result;
+                });
+            });
+            
+            Promise.all(trackedPromises).then(([otlieuBefore, otlieuReport, totalAttendance, attendanceReport]) => {
+                // Cache dữ liệu
+                window.reportData = {
+                    otlieuBefore: otlieuBefore,
+                    otlieuReport: otlieuReport,
+                    totalAttendance: totalAttendance,
+                    attendanceReport: {
+                        ...attendanceReport,
+                        month: currentMonth,
+                        year: currentYear
+                    }
+                };
+                
+                // Complete progress bar
+                progressBar.style.width = '100%';
+                
+                // Ẩn loading và hiển thị content
+                setTimeout(() => {
+                    document.getElementById('reportLoadingScreen').style.display = 'none';
+                    document.getElementById('reportContent').style.display = 'block';
+                    
+                    // Load tab đầu tiên
+                    loadOtlieuBeforeTab();
+                }, 300); // Delay nhỏ để UX mượt mà hơn
+            }).catch(error => {
+                console.error('Error loading report data:', error);
+                // Ẩn loading và hiển thị content ngay cả khi có lỗi
+                setTimeout(() => {
+                    document.getElementById('reportLoadingScreen').style.display = 'none';
+                    document.getElementById('reportContent').style.display = 'block';
+                }, 500);
+            });
         }
 
         // OT Lieu Report tab logic
         function loadOtlieuReportTab() {
             const container = document.getElementById('otlieuReportTab');
-            container.innerHTML = '<div class="text-muted">Loading...</div>';
-            fetch('/get_otlieu_report').then(res=>res.json()).then(data => {
-                renderPreviewTable('otlieuReportTab', data.columns, data.data);
-            });
+            if (window.reportData && window.reportData.otlieuReport) {
+                renderPreviewTable('otlieuReportTab', window.reportData.otlieuReport.columns, window.reportData.otlieuReport.data);
+            } else {
+                container.innerHTML = '<div class="text-muted">Loading...</div>';
+                fetch('/get_otlieu_report').then(res=>res.json()).then(data => {
+                    renderPreviewTable('otlieuReportTab', data.columns, data.data);
+                });
+            }
         }
         if(document.getElementById('nav-otlieu-report')) {
             document.getElementById('nav-otlieu-report').addEventListener('shown.bs.tab', loadOtlieuReportTab);
@@ -3312,10 +3472,14 @@
         // Total Attendance Detail tab logic
         function loadTotalAttendanceDetailTab() {
             const container = document.getElementById('totalAttendanceDetailTab');
-            container.innerHTML = '<div class="text-muted">Loading...</div>';
-            fetch('/get_total_attendance_detail').then(res=>res.json()).then(data => {
-                renderPreviewTable('totalAttendanceDetailTab', data.columns, data.data);
-            });
+            if (window.reportData && window.reportData.totalAttendance) {
+                renderPreviewTable('totalAttendanceDetailTab', window.reportData.totalAttendance.columns, window.reportData.totalAttendance.data);
+            } else {
+                container.innerHTML = '<div class="text-muted">Loading...</div>';
+                fetch('/get_total_attendance_detail').then(res=>res.json()).then(data => {
+                    renderPreviewTable('totalAttendanceDetailTab', data.columns, data.data);
+                });
+            }
         }
         if(document.getElementById('nav-total-attendance')) {
             document.getElementById('nav-total-attendance').addEventListener('shown.bs.tab',loadTotalAttendanceDetailTab)
@@ -3344,11 +3508,28 @@
         function loadAttendanceReportTable() {
             const month = document.getElementById('attendanceMonth').value;
             const year = document.getElementById('attendanceYear').value;
-            fetch(`/get_attendance_report?month=${month}&year=${year}`)
-                .then(res => res.json())
-                .then(data => {
-                    renderPreviewTable('attendanceReportTab', data.columns, data.rows);
-                });
+            
+            // Kiểm tra xem có dữ liệu cache cho tháng/năm hiện tại không
+            if (window.reportData && window.reportData.attendanceReport && 
+                window.reportData.attendanceReport.month == month && 
+                window.reportData.attendanceReport.year == year) {
+                renderPreviewTable('attendanceReportTab', window.reportData.attendanceReport.columns, window.reportData.attendanceReport.rows);
+            } else {
+                // Fetch dữ liệu mới nếu không có cache
+                fetch(`/get_attendance_report?month=${month}&year=${year}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        // Cache dữ liệu mới
+                        if (window.reportData) {
+                            window.reportData.attendanceReport = {
+                                ...data,
+                                month: month,
+                                year: year
+                            };
+                        }
+                        renderPreviewTable('attendanceReportTab', data.columns, data.rows);
+                    });
+            }
         }
 
         if(document.getElementById('nav-attendance-report')) {

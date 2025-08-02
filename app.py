@@ -712,7 +712,7 @@ def clear_otlieu():
 
 @app.route('/export', methods=['GET'])
 def export():
-    """Export processed data as Excel file using template with styling"""
+    """Export processed data as Excel file using existing template"""
     global sign_in_out_data, apply_data, ot_lieu_data, abnormal_data, employee_list_df, rules
     
     try:
@@ -742,58 +742,108 @@ def export():
             if os.path.exists(rules_path):
                 rules = pd.read_excel(rules_path)
         
-                # Create a new Excel file with timestamp
+        # Use existing template file
+        template_path = os.path.join(app.config['UPLOAD_FOLDER'], 'AttendanceReport.xlsx')
+        if not os.path.exists(template_path):
+            return jsonify({'error': 'Template file AttendanceReport.xlsx not found'}), 400
+        
+        # Create a copy of the template with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"AttendanceReport_{timestamp}.xlsx"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
-        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+        # Copy template file
+        import shutil
+        shutil.copy2(template_path, file_path)
+        
+        # Load the workbook
+        from openpyxl import load_workbook
+        workbook = load_workbook(file_path)
+        
+        # Update data in existing sheets
+        try:
             # 1. Employee List
             if employee_list_df is not None and not employee_list_df.empty:
-                employee_list_df.to_excel(writer, sheet_name='Employee List', index=False)
-                # Apply styling to Employee List
-                apply_employee_list_styling(writer.sheets['Employee List'])
+                if 'Employee List' in workbook.sheetnames:
+                    worksheet = workbook['Employee List']
+                    # Clear existing data (keep headers)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.value = None
+                    # Write new data
+                    for idx, row in employee_list_df.iterrows():
+                        for col_idx, value in enumerate(row, 1):
+                            worksheet.cell(row=idx+2, column=col_idx, value=value)
             
             # 2. Rules
             if rules is not None and not rules.empty:
-                rules.to_excel(writer, sheet_name='Rules', index=False)
-                # Apply styling to Rules
-                apply_rules_styling(writer.sheets['Rules'])
+                if 'Rules' in workbook.sheetnames:
+                    worksheet = workbook['Rules']
+                    # Clear existing data (keep headers)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.value = None
+                    # Write new data
+                    for idx, row in rules.iterrows():
+                        for col_idx, value in enumerate(row, 1):
+                            worksheet.cell(row=idx+2, column=col_idx, value=value)
             
             # 3. Sign In-Out Data
             if sign_in_out_data is not None and not sign_in_out_data.empty:
-                sign_in_out_data.to_excel(writer, sheet_name='Sign In-Out Data', index=False)
-                # Apply styling to Sign In-Out Data
-                apply_signinout_styling(writer.sheets['Sign In-Out Data'])
+                if 'Sign In-Out Data' in workbook.sheetnames:
+                    worksheet = workbook['Sign In-Out Data']
+                    # Clear existing data (keep headers)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.value = None
+                    # Write new data
+                    for idx, row in sign_in_out_data.iterrows():
+                        for col_idx, value in enumerate(row, 1):
+                            worksheet.cell(row=idx+2, column=col_idx, value=value)
             
             # 4. Apply Data
             if apply_data is not None and not apply_data.empty:
-                apply_data.to_excel(writer, sheet_name='Apply Data', index=False)
-                # Apply styling to Apply Data
-                apply_apply_styling(writer.sheets['Apply Data'])
+                if 'Apply Data' in workbook.sheetnames:
+                    worksheet = workbook['Apply Data']
+                    # Clear existing data (keep headers)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.value = None
+                    # Write new data
+                    for idx, row in apply_data.iterrows():
+                        for col_idx, value in enumerate(row, 1):
+                            worksheet.cell(row=idx+2, column=col_idx, value=value)
             
             # 5. OT Lieu Data
             if ot_lieu_data is not None and not ot_lieu_data.empty:
-                # Process OT Lieu data to handle error/warning objects
-                otlieu_export_df = ot_lieu_data.copy()
-                
-                # Convert error/warning objects to display strings
-                for col in otlieu_export_df.columns:
-                    for idx in otlieu_export_df.index:
-                        cell_value = otlieu_export_df.at[idx, col]
-                        if isinstance(cell_value, dict):
-                            if 'error' in cell_value:
-                                otlieu_export_df.at[idx, col] = f"ERROR: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
-                            elif 'warning' in cell_value:
-                                otlieu_export_df.at[idx, col] = f"WARNING: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
-                            elif 'gray' in cell_value:
-                                otlieu_export_df.at[idx, col] = f"GRAY: {cell_value.get('value', '')}"
-                            else:
-                                otlieu_export_df.at[idx, col] = str(cell_value.get('value', ''))
-                
-                otlieu_export_df.to_excel(writer, sheet_name='OT Lieu Data', index=False)
-                # Apply styling to OT Lieu Data
-                apply_otlieu_styling(writer.sheets['OT Lieu Data'])
+                if 'OT Lieu Data' in workbook.sheetnames:
+                    worksheet = workbook['OT Lieu Data']
+                    # Clear existing data (keep headers)
+                    for row in worksheet.iter_rows(min_row=2):
+                        for cell in row:
+                            cell.value = None
+                    
+                    # Process OT Lieu data to handle error/warning objects
+                    otlieu_export_df = ot_lieu_data.copy()
+                    
+                    # Convert error/warning objects to display strings
+                    for col in otlieu_export_df.columns:
+                        for idx in otlieu_export_df.index:
+                            cell_value = otlieu_export_df.at[idx, col]
+                            if isinstance(cell_value, dict):
+                                if 'error' in cell_value:
+                                    otlieu_export_df.at[idx, col] = f"ERROR: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
+                                elif 'warning' in cell_value:
+                                    otlieu_export_df.at[idx, col] = f"WARNING: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
+                                elif 'gray' in cell_value:
+                                    otlieu_export_df.at[idx, col] = f"GRAY: {cell_value.get('value', '')}"
+                                else:
+                                    otlieu_export_df.at[idx, col] = str(cell_value.get('value', ''))
+                    
+                    # Write new data
+                    for idx, row in otlieu_export_df.iterrows():
+                        for col_idx, value in enumerate(row, 1):
+                            worksheet.cell(row=idx+2, column=col_idx, value=value)
             
             # 6. OT Lieu Before (calculated)
             try:
@@ -801,10 +851,19 @@ def export():
                 otlieu_before_df = calculate_otlieu_before()
                 print(f"OT Lieu Before result: {otlieu_before_df.shape if otlieu_before_df is not None else 'None'}")
                 if otlieu_before_df is not None and not otlieu_before_df.empty:
-                    otlieu_before_df.to_excel(writer, sheet_name='OT Lieu Before', index=False)
-                    # Apply styling to OT Lieu Before
-                    apply_otlieu_before_styling(writer.sheets['OT Lieu Before'])
-                    print("OT Lieu Before exported successfully")
+                    if 'OT Lieu Before' in workbook.sheetnames:
+                        worksheet = workbook['OT Lieu Before']
+                        # Clear existing data (keep headers)
+                        for row in worksheet.iter_rows(min_row=2):
+                            for cell in row:
+                                cell.value = None
+                        # Write new data
+                        for idx, row in otlieu_before_df.iterrows():
+                            for col_idx, value in enumerate(row, 1):
+                                worksheet.cell(row=idx+2, column=col_idx, value=value)
+                        print("OT Lieu Before exported successfully")
+                    else:
+                        print("OT Lieu Before sheet not found in template")
                 else:
                     print("OT Lieu Before DataFrame is empty or None")
             except Exception as e:
@@ -820,10 +879,19 @@ def export():
                 if isinstance(otlieu_report_result, dict) and 'columns' in otlieu_report_result and 'rows' in otlieu_report_result:
                     otlieu_report_df = pd.DataFrame(otlieu_report_result['rows'], columns=otlieu_report_result['columns'])
                     if not otlieu_report_df.empty:
-                        otlieu_report_df.to_excel(writer, sheet_name='OT Lieu Report', index=False)
-                        # Apply styling to OT Lieu Report
-                        apply_otlieu_report_styling(writer.sheets['OT Lieu Report'])
-                        print("OT Lieu Report exported successfully")
+                        if 'OT Lieu Report' in workbook.sheetnames:
+                            worksheet = workbook['OT Lieu Report']
+                            # Clear existing data (keep headers)
+                            for row in worksheet.iter_rows(min_row=2):
+                                for cell in row:
+                                    cell.value = None
+                            # Write new data
+                            for idx, row in otlieu_report_df.iterrows():
+                                for col_idx, value in enumerate(row, 1):
+                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
+                            print("OT Lieu Report exported successfully")
+                        else:
+                            print("OT Lieu Report sheet not found in template")
                     else:
                         print("OT Lieu Report DataFrame is empty")
                 else:
@@ -841,10 +909,19 @@ def export():
                 if isinstance(total_attendance_result, dict) and 'columns' in total_attendance_result and 'rows' in total_attendance_result:
                     total_attendance_df = pd.DataFrame(total_attendance_result['rows'], columns=total_attendance_result['columns'])
                     if not total_attendance_df.empty:
-                        total_attendance_df.to_excel(writer, sheet_name='Total Attendance Detail', index=False)
-                        # Apply styling to Total Attendance Detail
-                        apply_total_attendance_styling(writer.sheets['Total Attendance Detail'])
-                        print("Total Attendance Detail exported successfully")
+                        if 'Total Attendance Detail' in workbook.sheetnames:
+                            worksheet = workbook['Total Attendance Detail']
+                            # Clear existing data (keep headers)
+                            for row in worksheet.iter_rows(min_row=2):
+                                for cell in row:
+                                    cell.value = None
+                            # Write new data
+                            for idx, row in total_attendance_df.iterrows():
+                                for col_idx, value in enumerate(row, 1):
+                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
+                            print("Total Attendance Detail exported successfully")
+                        else:
+                            print("Total Attendance Detail sheet not found in template")
                     else:
                         print("Total Attendance Detail DataFrame is empty")
                 else:
@@ -862,10 +939,19 @@ def export():
                 if isinstance(attendance_report_result, dict) and 'columns' in attendance_report_result and 'rows' in attendance_report_result:
                     attendance_report_df = pd.DataFrame(attendance_report_result['rows'], columns=attendance_report_result['columns'])
                     if not attendance_report_df.empty:
-                        attendance_report_df.to_excel(writer, sheet_name='Attendance Report', index=False)
-                        # Apply styling to Attendance Report
-                        apply_attendance_report_styling(writer.sheets['Attendance Report'])
-                        print("Attendance Report exported successfully")
+                        if 'Attendance Report' in workbook.sheetnames:
+                            worksheet = workbook['Attendance Report']
+                            # Clear existing data (keep headers)
+                            for row in worksheet.iter_rows(min_row=2):
+                                for cell in row:
+                                    cell.value = None
+                            # Write new data
+                            for idx, row in attendance_report_df.iterrows():
+                                for col_idx, value in enumerate(row, 1):
+                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
+                            print("Attendance Report exported successfully")
+                        else:
+                            print("Attendance Report sheet not found in template")
                     else:
                         print("Attendance Report DataFrame is empty")
                 else:
@@ -874,6 +960,15 @@ def export():
                 print(f"Error calculating Attendance Report: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        except Exception as e:
+            print(f"Error updating workbook: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Save the workbook
+        workbook.save(file_path)
+        workbook.close()
         
         return send_file(file_path, as_attachment=True, download_name=filename)
     
