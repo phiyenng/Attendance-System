@@ -128,6 +128,102 @@
             background: #e0e3ea;
             color: #222;
         }
+        
+        /* Attendance Report Table Styling - Complete Reset */
+        #attendanceReportTab .table-responsive {
+            overflow-x: auto;
+        }
+        
+        #attendanceReportTab .table-responsive table {
+            table-layout: fixed !important;
+            width: auto !important;
+            min-width: 100% !important;
+        }
+        
+        /* Scale columns by name using data attributes */
+        #attendanceReportTab .table-responsive th[data-col="Department"],
+        #attendanceReportTab .table-responsive td[data-col="Department"] {
+            width: 60px !important;
+            min-width: 60px !important;
+            max-width: 60px !important;
+            white-space: nowrap !important;
+        }
+        
+        #attendanceReportTab .table-responsive th[data-col="Name"],
+        #attendanceReportTab .table-responsive td[data-col="Name"] {
+            width: 150px !important;
+            min-width: 150px !important;
+            max-width: 150px !important;
+            padding: 2px !important;
+            white-space: nowrap !important;
+        }
+        
+        /* Date columns - all columns that are dates (YYYY-MM-DD format) */
+        #attendanceReportTab .table-responsive th[data-col^="20"],
+        #attendanceReportTab .table-responsive td[data-col^="20"] {
+            width: 35px !important;
+            min-width: 35px !important;
+            max-width: 35px !important;
+            font-size: 10px !important;
+            padding: 2px !important;
+            text-align: center !important;
+            white-space: nowrap !important;
+        }
+        
+        /* Summary columns by name */
+        #attendanceReportTab .table-responsive th[data-col="Normal"],
+        #attendanceReportTab .table-responsive td[data-col="Normal"],
+        #attendanceReportTab .table-responsive th[data-col="Leave"],
+        #attendanceReportTab .table-responsive td[data-col="Leave"],
+        #attendanceReportTab .table-responsive th[data-col="Trip"],
+        #attendanceReportTab .table-responsive td[data-col="Trip"],
+        #attendanceReportTab .table-responsive th[data-col="Miss"],
+        #attendanceReportTab .table-responsive td[data-col="Miss"],
+        #attendanceReportTab .table-responsive th[data-col="Late/Soon"],
+        #attendanceReportTab .table-responsive td[data-col="Late/Soon"],
+        #attendanceReportTab .table-responsive th[data-col="Lieu"],
+        #attendanceReportTab .table-responsive td[data-col="Lieu"],
+        #attendanceReportTab .table-responsive th[data-col="OT"],
+        #attendanceReportTab .table-responsive td[data-col="OT"],
+        #attendanceReportTab .table-responsive th[data-col="Supplement"],
+        #attendanceReportTab .table-responsive td[data-col="Supplement"] {
+            width: 60px !important;
+            min-width: 60px !important;
+            max-width: 60px !important;
+            font-size: 10px !important;
+            padding: 4px !important;
+            text-align: center !important;
+            white-space: nowrap !important;
+        }
+        
+        #attendanceReportTab .table-responsive tbody tr {
+            height: 25px !important;
+            min-height: 25px !important;
+            line-height: 25px !important;
+        }
+        
+        #attendanceReportTab .table-responsive tbody td {
+            height: 25px !important;
+            min-height: 25px !important;
+            vertical-align: middle !important;
+            padding: 4px 2px !important;
+            font-size: 10px !important;
+            line-height: 1.2 !important;
+        }
+        
+        /* Đảm bảo các ô header có chiều cao đồng đều */
+        #attendanceReportTab .table-responsive thead th {
+            height: 25px !important;
+            min-height: 25px !important;
+            vertical-align: middle !important;
+            padding: 8px 2px !important;
+        }
+        
+        
+        #attendanceReportTab .table-responsive tbody tr:nth-child(4n+3),
+        #attendanceReportTab .table-responsive tbody tr:nth-child(4n+4) {
+            background-color: #f8f9fa !important;
+        }
         .btn-clear {
             background: var(--color-danger);
             color: #fff;
@@ -956,6 +1052,7 @@
                         <div class="tab-pane fade" id="attendanceReportTab">
                             <div id="attendanceReportHeader" class="d-flex flex-column align-items-center mb-3">
                                 <h2 style="font-weight:bold; text-align:center; margin-bottom:10px;">Monthly Attendance Report</h2>
+                                <div id="attendanceReportPeriod" class="text-muted mb-2" style="font-size:0.9rem;">Loading period...</div>
                                 <div class="d-flex gap-2 align-items-center">
                                     <label for="attendanceMonth" class="form-label mb-0">Month:</label>
                                     <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
@@ -3059,102 +3156,151 @@
 
                 // Attendance Report Tab Logic
                 else if (containerId === 'attendanceReportTab') {
-                    // Giả sử columns = ['Department', 'Name', ...30 ngày..., 'Normal', 'Leave', ...]
-                    // rows = [ [dep, name, ...30 trạng thái..., tổng hợp...], ... ]
-                    // Bạn có thể điều chỉnh lại columns/rows cho phù hợp backend thực tế
-
-                    // Tính số ngày động (giả sử 30 ngày)
-                    const dayStartIdx = 2; // sau Department, Name
+                    console.log('Rendering Attendance Report tab...');
+                    console.log('Columns:', columns);
+                    console.log('First row:', rows[0]);
+                    
+                    // Tính số ngày động - cấu trúc: Department, Name, Shift, Date columns, Summary columns
+                    const dayStartIdx = 3; // sau Department, Name, Shift
                     const dayEndIdx = columns.length - 8; // 8 cột tổng hợp cuối
                     const dayCols = columns.slice(dayStartIdx, dayEndIdx);
+                    
+                    console.log('Day columns:', dayCols);
+                    console.log('Day start idx:', dayStartIdx, 'Day end idx:', dayEndIdx);
 
                     // Header 1
                     html += `<thead><tr>
-                        <th rowspan="3" style="position:sticky;left:0;z-index:2;background:#fff;">Department</th>
-                        <th rowspan="3" style="position:sticky;left:80px;z-index:2;background:#fff;">Name</th>
+                        <th rowspan="3" style="background:#fff;" data-col="Department">Department</th>
+                        <th rowspan="3" style="background:#fff;text-align:center;" data-col="Name">Name</th>
                         <th colspan="${dayCols.length}">Date</th>
-                        <th rowspan="3" style="background:#4caf50;color:#fff;">Normal<br><span style="font-size:0.8em;">Times</span></th>
-                        <th rowspan="3" style="background:#fbc02d;">Leave<br><span style="font-size:0.8em;">Times</span></th>
-                        <th rowspan="3" style="background:#b39ddb;">Trip<br><span style="font-size:0.8em;">Times</span></th>
-                        <th rowspan="3" style="background:#f44336;color:#fff;">Miss<br><span style="font-size:0.8em;">Times</span></th>
-                        <th rowspan="3" style="background:#29b6f6;">Late/Soon<br><span style="font-size:0.8em;">Times</span></th>
-                        <th rowspan="3" style="background:#ffd54f;">Lieu<br><span style="font-size:0.8em;">Hours</span></th>
-                        <th rowspan="3" style="background:#ffb74d;">OT<br><span style="font-size:0.8em;">Hours</span></th>
-                        <th rowspan="3" style="background:#4dd0e1;">Supplement<br><span style="font-size:0.8em;">Times</span></th>
-                    </tr><tr>`;
+                        <th rowspan="3" style="background:#4caf50;color:#fff;" data-col="Normal">Normal<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#fbc02d;" data-col="Leave">Leave<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#b39ddb;" data-col="Trip">Trip<br><span style="font-size:0.8em;">Times</span></th>
+                        <th rowspan="3" style="background:#f44336;color:#fff;" data-col="Miss">Miss<br><span style="font-size:0.8em;">Times</span></th>
+                        <th colspan="3" style="background:#29b6f6;" data-col="Late/Soon">Late/Soon</th>
+                        <th rowspan="3" style="background:#ffd54f;" data-col="Lieu">Lieu<br><span style="font-size:0.8em;">Hours</span></th>
+                        <th rowspan="3" style="background:#ffb74d;" data-col="OT">OT<br><span style="font-size:0.8em;">Hours</span></th>
+                        <th rowspan="3" style="background:#4dd0e1;" data-col="Supplement">Supplement<br><span style="font-size:0.8em;">Times</span></th>
+                    </tr>`;
 
                     // Header 2: thứ trong tuần
-                    dayCols.forEach((col, idx) => {
-                        // col có thể là "2024-07-20" hoặc "20/07" hoặc số ngày, bạn cần chuyển sang thứ
-                        let d = new Date(col); // hoặc parse lại nếu backend trả string ngày
-                        let wd = isNaN(d) ? '' : ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-                        let color = '';
-                        if (wd === 'Sat') color = 'background:#d0f8ce;';
-                        if (wd === 'Sun') color = 'background:#ffcdd2;';
-                        html += `<th style="text-align:center;${color}">${wd}</th>`;
-                    });
-                    html += `</tr><tr>`;
-                    // Header 3: ngày số
-                    dayCols.forEach((col, idx) => {
+                    html += `<tr>`;
+                    dayCols.forEach((col) => {
                         let d = new Date(col);
-                        let color = '';
-                        if (d.getDay && d.getDay() === 6) color = 'background:#d0f8ce;';
-                        if (d.getDay && d.getDay() === 0) color = 'background:#ffcdd2;';
-                        html += `<th style="text-align:center;${color}">${d.getDate ? d.getDate() : col}</th>`;
+                        let wd = isNaN(d.getTime()) ? '' : ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+                        let color = (d.getDay() === 6 || d.getDay() === 0) ? 'background:#CCF8FE;' : '';
+                        html += `<th style="text-align:center;${color}" data-col="${col}">${wd}</th>`;
                     });
-                    html += `</tr></thead><tbody>`;
+                    html += `<th style="background:#29b6f6;">Times</th>`;
+                    html += `<th style="background:#e0e0e0;">Times</th>`;
+                    html += `<th style="background:#fff9c4;">Minus</th>`;
+                    html += `</tr>`;
 
-                    // Body: mỗi nhân viên 2 dòng (sáng/chiều)
-                    const start = (page - 1) * pageSize;
-                    const end = Math.min(start + pageSize, rows.length);
-                    for (let i = start; i < end; i++) {
-                        let row = rows[i];
-                        for (let shift = 0; shift < 2; shift++) {
-                            html += `<tr>`;
-                            if (shift === 0) {
-                                html += `<td rowspan="2" style="position:sticky;left:0;z-index:1;background:#fff;vertical-align:middle;text-align:center;">${row[0]}</td>`;
-                                html += `<td rowspan="2" style="position:sticky;left:80px;z-index:1;background:#fff;vertical-align:middle;text-align:center;">${row[1]}</td>`;
-                            }
-                            for (let d = dayStartIdx; d < dayEndIdx; d++) {
-                                let val = row[d] && Array.isArray(row[d]) ? row[d][shift] : '';
-                                let cellColor = '';
-                                // Tô màu xanh cho ngày bình thường (N)
-                                if (val === 'N') cellColor = 'background:#4caf50;color:#fff;font-weight:bold;';
-                                // Tô màu đỏ cho ngày miss (M)
-                                else if (val === 'M') cellColor = 'background:#f44336;color:#fff;font-weight:bold;';
-                                // Các trạng thái khác
-                                else if (val === 'L') cellColor = 'background:#fbc02d;';
-                                else if (val === 'T') cellColor = 'background:#b39ddb;';
-                                else if (val === 'LS') cellColor = 'background:#29b6f6;';
-                                else if (val === 'LE') cellColor = 'background:#ffd54f;';
-                                else if (val === 'OT') cellColor = 'background:#ffb74d;';
-                                else if (val === 'S') cellColor = 'background:#4dd0e1;';
-                                html += `<td style="text-align:center;${cellColor}">${val||''}</td>`;
-                            }
-                            // Tổng hợp
-                            if (shift === 0) {
-                                for (let d = dayEndIdx; d < columns.length; d++) {
-                                    html += `<td rowspan="2" style="text-align:center;">${row[d]}</td>`;
-                                }
-                            }
-                            html += `</tr>`;
-                        }
-                    }
-                    html += `</tbody></table></div>`;
-                    html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
-                    html += `<span>Page ${page} of ${totalPages}</span>`;
-                    html += `<div>`;
-                    html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
-                    html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
-                    html += `</div></div>`;
-                    container.innerHTML = html;
-                    document.getElementById(`${containerId}_prevPageBtn`).onclick = function() {
-                        if (currentPage > 1) renderPage(currentPage - 1);
-                    };
-                    document.getElementById(`${containerId}_nextPageBtn`).onclick = function() {
-                        if (currentPage < totalPages) renderPage(currentPage + 1);
-                    };
-                    return; // Dừng ở đây, không render các tab khác
+                    // Header 3: ngày số
+                    html += `<tr>`;
+                    dayCols.forEach((col) => {
+                        let d = new Date(col);
+                        let day = isNaN(d.getTime()) ? '' : d.getDate();
+                        let color = (d.getDay() === 6 || d.getDay() === 0) ? 'background:#CCF8FE;' : '';
+                        html += `<th style="text-align:center;${color}" data-col="${col}">${day}</th>`;
+                    });
+                                         html += `<th></th><th></th><th></th>`; // LateSoon summary
+                     html += `</tr></thead><tbody>`;
+                     
+                     // Body: mỗi nhân viên 2 dòng (sáng/chiều)
+                     const start = (page - 1) * pageSize;
+                     const end = Math.min(start + pageSize, rows.length);
+                     for (let i = start; i < end; i++) {
+                         let row = rows[i];
+                         for (let shift = 0; shift < 2; shift++) {
+                             html += `<tr>`;
+                             if (shift === 0) {
+                                 html += `<td rowspan="2" style="background:#fff;vertical-align:middle;text-align:center;" data-col="Department">${row[0]}</td>`;
+                                 html += `<td rowspan="2" style="background:#fff;vertical-align:middle;text-align:left;" data-col="Name">${row[1]}</td>`;
+                             }
+                             for (let d = dayStartIdx; d < dayEndIdx; d++) {
+                                 let val = row[d] && Array.isArray(row[d]) ? row[d][shift] : row[d];
+                                 let cellColor = '';
+                                 
+                                 // Logic tô màu dựa trên giá trị
+                                 if (val === 'N') {
+                                     cellColor = 'background:#4caf50;color:#fff;font-weight:bold;'; // Normal - xanh lá
+                                 } else if (val === 'L') {
+                                     cellColor = 'background:#fbc02d;font-weight:bold;'; // Leave - vàng
+                                 } else if (val === 'T') {
+                                     cellColor = 'background:#b39ddb;color:#fff;font-weight:bold;'; // Trip - tím
+                                 } else if (val === 'S') {
+                                     cellColor = 'background:#4dd0e1;font-weight:bold;'; // Supplement - xanh nhạt
+                                 } else if (val === 'LE') {
+                                     cellColor = 'background:#ffd54f;font-weight:bold;'; // Lieu - cam
+                                 } else if (val === 'LS') {
+                                     cellColor = 'background:#29b6f6;color:#fff;font-weight:bold;'; // Late/Soon - xanh dương
+                                 } else if (val === 'OT') {
+                                     cellColor = 'background:#ffb74d;font-weight:bold;'; // OT - cam nhạt
+                                 } else if (val === 'M') {
+                                     cellColor = 'background:#f44336;color:#fff;font-weight:bold;'; // Miss - đỏ
+                                 } else if (val === '') {
+                                     cellColor = ''; // Cuối tuần - trắng, không tô màu
+                                 } else if (val === 'N') {
+                                     cellColor = 'background:#e8f5e8;font-weight:bold;'; // Normal - xanh nhạt
+                                 } else if (val && val !== 'M' && val !== 'N' && val !== '') {
+                                     // Nếu có thời gian thực tế (HH:MM), tô màu vàng
+                                     if (val.match(/^\d{1,2}:\d{2}$/)) {
+                                         cellColor = 'background:#fff3cd;font-weight:bold;'; // Thời gian bất hợp lệ - vàng
+                                     }
+                                 }
+                                 
+                                 html += `<td style="text-align:center;${cellColor}" data-col="${columns[d]}">${val || ''}</td>`;
+                             }
+                             
+                             // Tổng hợp
+                             if (shift === 0) {
+                                 for (let d = dayEndIdx; d < columns.length; d++) {
+                                     let colName = columns[d];
+                                     if (colName === 'Late/Soon') {
+                                         // Hiển thị 3 cột cho Late/Soon
+                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">${row[d]}</td>`; // Times 1
+                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">0</td>`; // Times 2
+                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">0</td>`; // Minus
+                                     } else {
+                                         html += `<td rowspan="2" style="text-align:center;" data-col="${colName}">${row[d]}</td>`;
+                                     }
+                                 }
+                             }
+                             html += `</tr>`;
+                         }
+                     }
+                     html += `</tbody></table></div>`;
+                     
+                     // Pagination
+                     html += `<div class='d-flex justify-content-between align-items-center mt-2'>`;
+                     html += `<span>Page ${page} of ${totalPages}</span>`;
+                     html += `<div>`;
+                     html += `<button class='btn btn-sm btn-outline-secondary me-1' ${page === 1 ? 'disabled' : ''} id='${containerId}_prevPageBtn'>Prev</button>`;
+                     html += `<button class='btn btn-sm btn-outline-secondary' ${page === totalPages ? 'disabled' : ''} id='${containerId}_nextPageBtn'>Next</button>`;
+                     html += `</div></div>`;
+                     
+                     console.log('Setting container HTML...');
+                     console.log('Container:', container);
+                     console.log('HTML length:', html.length);
+                     container.innerHTML = html;
+                     console.log('Container HTML set successfully');
+                     
+                     // Add pagination buttons if they exist
+                     const prevBtn = document.getElementById(`${containerId}_prevPageBtn`);
+                     const nextBtn = document.getElementById(`${containerId}_nextPageBtn`);
+                     
+                     if (prevBtn) {
+                         prevBtn.onclick = function() {
+                             if (currentPage > 1) renderPage(currentPage - 1);
+                         };
+                     }
+                     if (nextBtn) {
+                         nextBtn.onclick = function() {
+                             if (currentPage < totalPages) renderPage(currentPage + 1);
+                         };
+                     }
+                     return; // Dừng ở đây, không render các tab khác
                 }
 
                 else {
@@ -3506,19 +3652,29 @@
         }
 
         function loadAttendanceReportTable() {
+            // Lần đầu load: không gửi parameter để backend tự động xác định
             const month = document.getElementById('attendanceMonth').value;
             const year = document.getElementById('attendanceYear').value;
+            
+            console.log('Loading attendance report...');
             
             // Kiểm tra xem có dữ liệu cache cho tháng/năm hiện tại không
             if (window.reportData && window.reportData.attendanceReport && 
                 window.reportData.attendanceReport.month == month && 
                 window.reportData.attendanceReport.year == year) {
                 renderPreviewTable('attendanceReportTab', window.reportData.attendanceReport.columns, window.reportData.attendanceReport.rows);
+                updateAttendanceReportPeriod(window.reportData.attendanceReport);
             } else {
-                // Fetch dữ liệu mới nếu không có cache
-                fetch(`/get_attendance_report?month=${month}&year=${year}`)
+                // Fetch dữ liệu mới - không gửi parameter để backend tự động xác định
+                fetch(`/get_attendance_report`)
                     .then(res => res.json())
                     .then(data => {
+                        console.log('Received data:', data);
+                        console.log('Columns:', data.columns);
+                        console.log('Rows count:', data.rows ? data.rows.length : 0);
+                        console.log('First row:', data.rows ? data.rows[0] : 'No rows');
+                        console.log('Period element exists:', !!document.getElementById('attendanceReportPeriod'));
+                        
                         // Cache dữ liệu mới
                         if (window.reportData) {
                             window.reportData.attendanceReport = {
@@ -3527,8 +3683,92 @@
                                 year: year
                             };
                         }
-                        renderPreviewTable('attendanceReportTab', data.columns, data.rows);
+                        console.log('About to render table...');
+                        try {
+                            renderPreviewTable('attendanceReportTab', data.columns, data.rows);
+                            console.log('Table rendered successfully');
+                        } catch (error) {
+                            console.error('Error rendering table:', error);
+                        }
+                        updateAttendanceReportPeriod(data);
+                        
+                        // Cập nhật dropdown theo tháng được xác định từ backend
+                        updateDropdownFromData(data);
+                    })
+                    .catch(error => {
+                        console.error('Error loading attendance report:', error);
                     });
+            }
+        }
+        
+        function updateDropdownFromData(data) {
+            if (data.columns && data.columns.length > 0) {
+                // Tìm cột ngày đầu tiên và cuối cùng
+                const dayColumns = data.columns.slice(3, -8); // Bỏ qua Department, Name, Shift và 8 cột tổng hợp cuối
+                if (dayColumns.length > 0) {
+                    const firstDate = new Date(dayColumns[0]);
+                    const lastDate = new Date(dayColumns[dayColumns.length - 1]);
+                    
+                    if (!isNaN(firstDate.getTime()) && !isNaN(lastDate.getTime())) {
+                        // Lấy tháng/năm từ ngày giữa
+                        const middleDate = new Date((firstDate.getTime() + lastDate.getTime()) / 2);
+                        const detectedMonth = middleDate.getMonth() + 1; // getMonth() trả về 0-11
+                        const detectedYear = middleDate.getFullYear();
+                        
+                        // Cập nhật dropdown
+                        const monthSel = document.getElementById('attendanceMonth');
+                        const yearSel = document.getElementById('attendanceYear');
+                        
+                        if (monthSel && yearSel) {
+                            monthSel.value = detectedMonth;
+                            yearSel.value = detectedYear;
+                        }
+                    }
+                }
+            }
+        }
+        
+        function updateAttendanceReportPeriod(data) {
+            let periodElement = document.getElementById('attendanceReportPeriod');
+            if (!periodElement) {
+                // Tạo element nếu không tồn tại
+                const headerDiv = document.getElementById('attendanceReportHeader');
+                if (headerDiv) {
+                    periodElement = document.createElement('div');
+                    periodElement.id = 'attendanceReportPeriod';
+                    periodElement.className = 'text-muted mb-2';
+                    periodElement.style.fontSize = '0.9rem';
+                    headerDiv.insertBefore(periodElement, headerDiv.children[1]); // Insert after h2
+                    console.log('Created period element dynamically');
+                } else {
+                    console.log('Header div not found, skipping period update');
+                    return;
+                }
+            }
+            
+            if (data.columns && data.columns.length > 0) {
+                // Tìm cột ngày đầu tiên và cuối cùng
+                const dayColumns = data.columns.slice(3, -8); // Bỏ qua Department, Name, Shift và 8 cột tổng hợp cuối
+                if (dayColumns.length > 0) {
+                    const firstDate = dayColumns[0];
+                    const lastDate = dayColumns[dayColumns.length - 1];
+                    
+                    // Parse ngày tháng
+                    const startDate = new Date(firstDate);
+                    const endDate = new Date(lastDate);
+                    
+                    if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                        const startStr = startDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                        const endStr = endDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                        periodElement.innerHTML = `<strong>Period:</strong> ${startStr} - ${endStr} <span class="text-info">(Auto-detected from data)</span>`;
+                    } else {
+                        periodElement.innerHTML = '<span class="text-warning">Unable to determine period from data</span>';
+                    }
+                } else {
+                    periodElement.innerHTML = '<span class="text-warning">No date columns found</span>';
+                }
+            } else {
+                periodElement.innerHTML = '<span class="text-warning">No data available</span>';
             }
         }
 

@@ -934,9 +934,19 @@ def export():
             # 9. Attendance Report (calculated)
             try:
                 print("Calculating Attendance Report...")
+                print(f"Global variables - sign_in_out_data: {sign_in_out_data.shape if sign_in_out_data is not None else 'None'}")
+                print(f"Global variables - apply_data: {apply_data.shape if apply_data is not None else 'None'}")
+                print(f"Global variables - ot_lieu_data: {ot_lieu_data.shape if ot_lieu_data is not None else 'None'}")
+                print(f"Global variables - employee_list_df: {employee_list_df.shape if employee_list_df is not None else 'None'}")
+                print(f"Global variables - rules: {rules.shape if rules is not None else 'None'}")
+                
                 attendance_report_result = calculate_attendance_report_for_export()
                 print(f"Attendance Report result: {attendance_report_result}")
+                print(f"Attendance Report result type: {type(attendance_report_result)}")
+                
                 if isinstance(attendance_report_result, dict) and 'columns' in attendance_report_result and 'rows' in attendance_report_result:
+                    print(f"Attendance Report columns: {attendance_report_result['columns']}")
+                    print(f"Attendance Report rows count: {len(attendance_report_result['rows'])}")
                     attendance_report_df = pd.DataFrame(attendance_report_result['rows'], columns=attendance_report_result['columns'])
                     if not attendance_report_df.empty:
                         if 'Attendance Report' in workbook.sheetnames:
@@ -2154,7 +2164,7 @@ def get_total_attendance_detail():
             return 'NONE'
             
         df_sign = pd.DataFrame(signinout_data)
-        if 'Name' not in df_sign.columns or 'attendance_time' not in df_sign.columns:
+        if 'emp_name' not in df_sign.columns or 'attendance_time' not in df_sign.columns:
             return 'NONE'
             
         df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
@@ -2163,12 +2173,12 @@ def get_total_attendance_detail():
         target_name = extract_name_from_emp_name(emp_name)
         
         # Lọc bản ghi của nhân viên trong ngày
-        mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == check_date)
+        mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == check_date)
         day_records = df_sign[mask]
         
         if day_records.empty:
             return 'NONE'
-        
+            
         # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất cho mỗi loại (sáng/chiều)
         morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
         afternoon_records = day_records[day_records['attendance_time'].dt.hour >= 12]
@@ -2196,6 +2206,8 @@ def get_total_attendance_detail():
             return 'NONE'
 
     # Tính toán cho từng nhân viên
+
+    
     for idx, emp in result.iterrows():
         emp_name = emp["Employee's name"]
         normal_days = 0
@@ -2226,12 +2238,16 @@ def get_total_attendance_detail():
                 # Xác định ca làm việc
                 shift_info = get_shift_info(emp_name, dt_date, signinout_data)
                 
+    
+                
                 # Tính Normal working days
                 if not has_ot and not has_lieu and not has_apply_leave:
                     if shift_info == 'FULL':
                         normal_days += 1.0  # Cả ngày
+    
                     elif shift_info == 'AM' or shift_info == 'PM':
                         normal_days += 0.5  # Một ca
+
 
         # Tính các loại leave từ apply_data
         target_name = extract_name_from_emp_name(emp_name)
@@ -2274,13 +2290,14 @@ def get_total_attendance_detail():
                                     leave_days = 1.0  # Nghỉ nhiều ngày, mỗi ngày = 1.0
                                 
                                 # Phân loại theo loại leave
-                                if 'annual' in leave_type:
+                                leave_type_lower = leave_type.lower()
+                                if 'annual' in leave_type_lower:
                                     annual_leave += leave_days
-                                elif 'sick' in leave_type:
+                                elif 'sick' in leave_type_lower:
                                     sick_leave += leave_days
-                                elif 'unpaid' in leave_type:
+                                elif 'unpaid' in leave_type_lower:
                                     unpaid_leave += leave_days
-                                elif 'welfare' in leave_type:
+                                elif 'welfare' in leave_type_lower:
                                     welfare_leave += leave_days
                         
                         current_date += timedelta(days=1)
@@ -2315,8 +2332,16 @@ def get_total_attendance_detail():
             
             if is_normal_workday:
                 # Lấy tất cả bản ghi của nhân viên này trong ngày dt
-                mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == dt.date())
-                day_records = df_sign[mask]
+                # Chuyển signinout_data từ list of dicts thành DataFrame
+                df_sign = pd.DataFrame(signinout_data)
+                if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
+                    df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+                    df_sign['date'] = df_sign['attendance_time'].dt.date
+                    mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == dt.date())
+                    day_records = df_sign[mask]
+                else:
+                    day_records = pd.DataFrame()
+
                 if not day_records.empty:
                     # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất và muộn nhất
                     morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
@@ -2365,6 +2390,8 @@ def get_total_attendance_detail():
         result.at[idx, 'Forget scanning'] = forget_scanning
         result.at[idx, 'Violation'] = violation
         
+
+        
         # Tính Total
         total_leave = annual_leave + sick_leave + unpaid_leave + welfare_leave
         result.at[idx, 'Total'] = total_leave
@@ -2402,9 +2429,55 @@ def get_total_attendance_detail():
 
 @app.route('/get_attendance_report')
 def get_attendance_report():
-    # Lấy tháng/năm từ query string
-    month = int(request.args.get('month', 7))
-    year = int(request.args.get('year', 2024))
+    # Lấy dữ liệu từ các file tạm trước
+    signinout_data = []
+    apply_data = []
+    otlieu_data = []
+    
+    if os.path.exists(TEMP_SIGNINOUT_PATH):
+        signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
+        signinout_data = signinout_df.to_dict('records')
+    
+    if os.path.exists(TEMP_APPLY_PATH):
+        apply_df = pd.read_excel(TEMP_APPLY_PATH)
+        apply_data = apply_df.to_dict('records')
+    
+    if os.path.exists(TEMP_OTLIEU_PATH):
+        otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
+        otlieu_data = otlieu_df.to_dict('records')
+
+    # Tự động xác định tháng/năm từ dữ liệu signin/out
+    month = 7  # default
+    year = 2024  # default
+    
+    if signinout_data and len(signinout_data) > 0:
+        # Tìm ngày đầu tiên và cuối cùng trong dữ liệu signin/out
+        dates = []
+        for record in signinout_data:
+            if 'attendance_time' in record and pd.notna(record['attendance_time']):
+                try:
+                    date_val = pd.to_datetime(record['attendance_time'])
+                    dates.append(date_val)
+                except:
+                    continue
+        
+        if dates:
+            min_date = min(dates)
+            max_date = max(dates)
+            
+            # Tìm tháng phổ biến nhất trong dữ liệu
+            month_counts = {}
+            for date in dates:
+                month_key = (date.month, date.year)
+                month_counts[month_key] = month_counts.get(month_key, 0) + 1
+            
+            # Lấy tháng/năm có nhiều dữ liệu nhất
+            most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+            month, year = most_common_month
+            
+            print(f"Auto-detected month/year from signin/out data: {month}/{year}")
+            print(f"Date range in data: {min_date.date()} to {max_date.date()}")
+            print(f"Month distribution: {month_counts}")
 
     # Lấy danh sách nhân viên từ file employee_list.csv
     emp_path = EMPLOYEE_LIST_PATH
@@ -2429,23 +2502,6 @@ def get_attendance_report():
     end_date = pd.Timestamp(year, month, 19)
     days = pd.date_range(start=start_date, end=end_date, freq='D')
     day_cols = [d.strftime('%Y-%m-%d') for d in days]
-
-    # Lấy dữ liệu từ các file tạm
-    signinout_data = []
-    apply_data = []
-    otlieu_data = []
-    
-    if os.path.exists(TEMP_SIGNINOUT_PATH):
-        signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
-        signinout_data = signinout_df.to_dict('records')
-    
-    if os.path.exists(TEMP_APPLY_PATH):
-        apply_df = pd.read_excel(TEMP_APPLY_PATH)
-        apply_data = apply_df.to_dict('records')
-    
-    if os.path.exists(TEMP_OTLIEU_PATH):
-        otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
-        otlieu_data = otlieu_df.to_dict('records')
 
     # Lấy thông tin ngày đặc biệt từ rules
     holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
@@ -2599,104 +2655,121 @@ def get_attendance_report():
                 day_type = get_day_type(day, holidays, special_weekends, special_workdays)
                 day_date = day.date()
                 
-                # Điều kiện xử lý: Ngày làm việc (Thứ 2 → Thứ 6, không Lieu)
-                if day_type == 'Weekday' and not is_lieu_day(emp_name, day_date, otlieu_data):
+                # Kiểm tra có phải ngày Lieu không
+                is_lieu = is_lieu_day(emp_name, day_date, otlieu_data)
+                
+                # Chỉ xử lý cho ngày làm việc bình thường (không cuối tuần, ngày lễ, Lieu)
+                if day_type == 'Weekday' and not is_lieu:
                     
                     # Lấy thông tin signinout cho ngày này
                     day_signinout = []
                     if signinout_data:
                         df_sign = pd.DataFrame(signinout_data)
-                        if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
+                        if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
                             df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
                             df_sign['date'] = df_sign['attendance_time'].dt.date
                             target_name = extract_name_from_emp_name(emp_name)
-                            mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
+                            mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
                             day_signinout = df_sign[mask]['attendance_time'].tolist()
                     
                     # Lấy thông tin apply cho ngày này
                     apply_info = get_apply_info_for_date(emp_name, day_date, apply_data)
                     
-                    # Xử lý theo loại apply
-                    if apply_info:
+                    # Logic điền dữ liệu theo thứ tự ưu tiên nghiêm ngặt
+                    cell_value = None
+                    
+                    # 1. Kiểm tra Apply (ưu tiên cao nhất)
+                    if apply_info and apply_info['is_approved']:
                         apply_type = apply_info['type']
                         leave_type = apply_info['leave_type'].lower()
                         
-                        if apply_type == 'Leave':
-                            # Logic Leave: cộng 0.5 ngày vào cột tương ứng
-                            if 'annual' in leave_type:
-                                row[day_str] = 'L'  # Leave
-                            elif 'sick' in leave_type:
-                                row[day_str] = 'L'  # Leave
-                            elif 'unpaid' in leave_type:
-                                row[day_str] = 'L'  # Leave
-                            elif 'welfare' in leave_type:
-                                row[day_str] = 'L'  # Leave
-                            else:
-                                row[day_str] = 'L'  # Leave
-                                
+                        # 1.1 Trip (ưu tiên cao nhất)
+                        if apply_type == 'Trip':
+                            cell_value = 'T'
+                        # 1.2 Leave (chỉ áp dụng cho ngày làm việc bình thường)
+                        elif apply_type == 'Leave':
+                            cell_value = 'L'
+                        # 1.3 Supplement
                         elif apply_type == 'Supplement':
-                            # Logic Supplement: miễn trừ tính trễ nếu hợp lệ
-                            if day_signinout:
-                                check_in = min(day_signinout)
-                                check_out = max(day_signinout)
-                                actual_hours, late_minutes = calculate_actual_hours(check_in, check_out)
-                                
-                                if actual_hours >= 8:
-                                    row[day_str] = 'N'  # Normal
-                                else:
-                                    row[day_str] = 'LS'  # Late/Soon
+                            cell_value = 'S'
+                    
+                    # 2. Nếu không có Apply, lấy dữ liệu chấm công thực tế
+                    if cell_value is None and day_signinout:
+                        if shift == 'Morning shift':
+                            # Ca sáng: lấy thời gian sớm nhất
+                            earliest_time = min(day_signinout)
+                            if earliest_time.hour < 16:  # Hợp lý cho ca sáng
+                                cell_value = 'N'  # Normal - chỉ tô xanh, không hiện thời gian
                             else:
-                                row[day_str] = 'S'  # Supplement
-                                
-                        elif apply_type == 'Trip':
-                            # Logic Trip: xử lý giống Leave
-                            row[day_str] = 'T'  # Trip
-                    else:
-                        # Không có apply, tính normal working
-                        if day_signinout:
-                            check_in = min(day_signinout)
-                            check_out = max(day_signinout)
-                            actual_hours, late_minutes = calculate_actual_hours(check_in, check_out)
-                            
-                            # Tính normal working days
-                            if actual_hours >= 8:
-                                row[day_str] = 'N'  # Normal
+                                cell_value = earliest_time.strftime('%H:%M')  # Hiện thời gian + tô vàng
+                        else:  # Afternoon shift
+                            # Ca chiều: lấy thời gian muộn nhất
+                            latest_time = max(day_signinout)
+                            if latest_time.hour >= 10:  # Hợp lý cho ca chiều
+                                cell_value = 'N'  # Normal - chỉ tô xanh, không hiện thời gian
                             else:
-                                row[day_str] = 'LS'  # Late/Soon
-                                
-                                # Nếu thiếu cả sáng & chiều → "Tô đỏ ô"
-                                if actual_hours < 4:
-                                    row[day_str] = 'M'  # Miss
+                                cell_value = latest_time.strftime('%H:%M')  # Hiện thời gian + tô vàng
+                    
+                    # 3. Nếu không có dữ liệu gì
+                    if cell_value is None:
+                        # Kiểm tra xem có phải cuối tuần không
+                        day_of_week = day.weekday()  # 5=Saturday, 6=Sunday
+                        if day_of_week >= 5:  # Cuối tuần
+                            cell_value = ''  # Để trống
                         else:
-                            # Không có signinout → quên quẹt
-                            row[day_str] = 'M'  # Miss
+                            cell_value = 'M'  # Miss cho ngày trong tuần
+                    
+                    row[day_str] = cell_value
                 else:
-                    # Không phải ngày làm việc hoặc có Lieu
-                    if day_type == 'Holiday':
-                        row[day_str] = 'H'  # Holiday
-                    elif day_type == 'Weekend':
-                        row[day_str] = 'W'  # Weekend
-                    elif is_lieu_day(emp_name, day_date, otlieu_data):
+                    # Ngày cuối tuần, ngày lễ, hoặc Lieu
+                    if is_lieu:
                         row[day_str] = 'LE'  # Lieu
-                    elif has_ot_on_date(emp_name, day_date, otlieu_data):
-                        row[day_str] = 'OT'  # OT
                     else:
-                        row[day_str] = ''  # Empty
+                        row[day_str] = ''  # Ngày nghỉ
             
-            # Tính tổng hợp
+            # Tính tổng hợp và phát hiện sai phạm
             summary = {'Normal': 0, 'Leave': 0, 'Trip': 0, 'Miss': 0, 'Late/Soon': 0, 'Lieu': 0, 'OT': 0, 'Supplement': 0}
+            total_late_minutes = 0
+            
             for day in days:
                 day_str = day.strftime('%Y-%m-%d')
                 val = row.get(day_str, '')
-                if val == 'N': summary['Normal'] += 1
-                elif val == 'L': summary['Leave'] += 1
+                
+                # Đếm các loại
+                if val == 'L': summary['Leave'] += 1
                 elif val == 'T': summary['Trip'] += 1
-                elif val == 'M': summary['Miss'] += 1
-                elif val == 'LS': summary['Late/Soon'] += 1
+                elif val == 'S': summary['Supplement'] += 1
                 elif val == 'LE': summary['Lieu'] += 1
                 elif val == 'OT': summary['OT'] += 1
-                elif val == 'S': summary['Supplement'] += 1
+                elif val == 'M': summary['Miss'] += 1
+                elif val == 'N':  # Normal - dữ liệu hợp lệ
+                    summary['Normal'] += 1
+                elif val and val != '' and ':' in val:  # Có thời gian chấm công bất hợp lệ
+                    summary['Miss'] += 1  # Đếm vào Miss
+                    
+                    # Kiểm tra sai phạm (trễ/về sớm)
+                    try:
+                        # Quy đổi thời gian làm việc
+                        if shift == 'Morning shift':
+                            # Ca sáng: giả sử giờ ra là 17:30
+                            check_in = pd.to_datetime(val)
+                            check_out = pd.to_datetime('17:30')
+                        else:
+                            # Ca chiều: giả sử giờ vào là 08:00
+                            check_in = pd.to_datetime('08:00')
+                            check_out = pd.to_datetime(val)
+                        
+                        # Tính giờ làm việc thực tế (trừ 1.5h nghỉ trưa)
+                        work_hours = (check_out - check_in).total_seconds() / 3600 - 1.5
+                        
+                        # So sánh với 8 tiếng tiêu chuẩn
+                        if work_hours < 8:
+                            late_minutes = int((8 - work_hours) * 60)
+                            total_late_minutes += late_minutes
+                    except:
+                        pass
             
+            summary['Late/Soon'] = total_late_minutes
             row.update(summary)
             result_rows.append(row)
             row_no += 1
@@ -3148,7 +3221,7 @@ def calculate_total_attendance_detail_for_export():
             if match:
                 return match.group(1).strip()
             return emp_name.strip()
-
+        
         def is_lieu_day(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
@@ -3220,7 +3293,7 @@ def calculate_total_attendance_detail_for_export():
             
             target_name = extract_name_from_emp_name(emp_name)
             day_records = signinout_data[
-                (signinout_data['Name'].astype(str).str.strip() == target_name) &
+                (signinout_data['emp_name'].astype(str).str.strip() == target_name) &
                 (pd.to_datetime(signinout_data['attendance_time'], errors='coerce').dt.date == check_date)
             ]
             
@@ -3420,10 +3493,38 @@ def calculate_attendance_report_for_export():
             return {'columns': [], 'rows': []}
     
     try:
-        # Get current month/year
-        current_date = datetime.now()
-        month = current_date.month
-        year = current_date.year
+        # Tự động xác định tháng/năm từ dữ liệu signin/out
+        month = 7  # default
+        year = 2024  # default
+        
+        if not sign_in_out_data.empty:
+            # Tìm ngày đầu tiên và cuối cùng trong dữ liệu signin/out
+            dates = []
+            for _, record in sign_in_out_data.iterrows():
+                if 'attendance_time' in record and pd.notna(record['attendance_time']):
+                    try:
+                        date_val = pd.to_datetime(record['attendance_time'])
+                        dates.append(date_val)
+                    except:
+                        continue
+            
+            if dates:
+                min_date = min(dates)
+                max_date = max(dates)
+                
+                # Tìm tháng phổ biến nhất trong dữ liệu
+                month_counts = {}
+                for date in dates:
+                    month_key = (date.month, date.year)
+                    month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                
+                # Lấy tháng/năm có nhiều dữ liệu nhất
+                most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                month, year = most_common_month
+                
+                print(f"Auto-detected month/year from signin/out data (export): {month}/{year}")
+                print(f"Date range in data: {min_date.date()} to {max_date.date()}")
+                print(f"Month distribution: {month_counts}")
         
         # Calculate date range: 20th of previous month to 19th of current month
         if month == 1:
@@ -3461,7 +3562,7 @@ def calculate_attendance_report_for_export():
             if match:
                 return match.group(1).strip()
             return emp_name.strip()
-
+        
         def is_lieu_day(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
@@ -3588,11 +3689,11 @@ def calculate_attendance_report_for_export():
                         day_signinout = []
                         if sign_in_out_data is not None and not sign_in_out_data.empty:
                             df_sign = sign_in_out_data.copy()
-                            if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
+                            if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
                                 df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
                                 df_sign['date'] = df_sign['attendance_time'].dt.date
                                 target_name = extract_name_from_emp_name(emp_name)
-                                mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
+                                mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
                                 day_signinout = df_sign[mask]['attendance_time'].tolist()
                         
                         # Get apply info for this day
@@ -4083,6 +4184,9 @@ def apply_attendance_report_styling(worksheet):
     header_fill = PatternFill(start_color="255E91", end_color="255E91", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center")
     
+    # Body alignment for Name column
+    name_body_alignment = Alignment(horizontal="left", vertical="center")
+    
     # Apply header styling
     for cell in worksheet[1]:
         cell.font = header_font
@@ -4090,7 +4194,7 @@ def apply_attendance_report_styling(worksheet):
         cell.alignment = header_alignment
     
     # Auto-adjust column widths
-    for column in worksheet.columns:
+    for col_idx, column in enumerate(worksheet.columns, 1):
         max_length = 0
         column_letter = column[0].column_letter
         for cell in column:
@@ -4099,7 +4203,12 @@ def apply_attendance_report_styling(worksheet):
                     max_length = len(str(cell.value))
             except:
                 pass
-        adjusted_width = min(max_length + 2, 50)
+        
+        # Special handling for Name column (2nd column)
+        if col_idx == 2:  # Name column
+            adjusted_width = min(max_length + 1, 30)  # Slightly tighter width
+        else:
+            adjusted_width = min(max_length + 2, 50)
         worksheet.column_dimensions[column_letter].width = adjusted_width
     
     # Border styling
@@ -4114,6 +4223,10 @@ def apply_attendance_report_styling(worksheet):
     for row_idx, row in enumerate(worksheet.iter_rows(), 1):
         for col_idx, cell in enumerate(row, 1):
             cell.border = thin_border
+            
+            # Apply specific styling for Name column (assuming it's the 2nd column)
+            if col_idx == 2 and row_idx > 1:  # Name column, body rows
+                cell.alignment = name_body_alignment
             
             # Apply status styling based on cell content
             if row_idx > 1:  # Skip header row
