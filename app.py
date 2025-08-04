@@ -2073,11 +2073,21 @@ def get_total_attendance_detail():
             return 'Weekend'
         return 'Weekday'
 
+    # Hàm xử lý matching tên nhân viên
+    def extract_name_from_emp_name(emp_name):
+        # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
+        import re
+        match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
+        if match:
+            return match.group(1).strip()
+        return emp_name.strip()
+
     # Hàm kiểm tra nhân viên có nghỉ Lieu ngày đó không
     def is_lieu_day(emp_name, check_date, otlieu_data):
+        target_name = extract_name_from_emp_name(emp_name)
         for record in otlieu_data:
             name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == emp_name.strip():
+            if name_val.strip() == target_name:
                 # Kiểm tra các cột Lieu From, Lieu To
                 lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                 for col in lieu_cols:
@@ -2092,9 +2102,10 @@ def get_total_attendance_detail():
 
     # Hàm kiểm tra có OT trong ngày không
     def has_ot_on_date(emp_name, check_date, otlieu_data):
+        target_name = extract_name_from_emp_name(emp_name)
         for record in otlieu_data:
             name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == emp_name.strip():
+            if name_val.strip() == target_name:
                 # Kiểm tra các cột OT Date, Date, OT date
                 ot_date_cols = ['OT Date', 'Date', 'OT date']
                 for col in ot_date_cols:
@@ -2109,8 +2120,9 @@ def get_total_attendance_detail():
 
     # Hàm kiểm tra có Apply Leave trong ngày không
     def has_apply_leave_on_date(emp_name, check_date, apply_data):
+        target_name = extract_name_from_emp_name(emp_name)
         for record in apply_data:
-            if (record.get('Name', '').strip() == emp_name.strip() and 
+            if (record.get('Name', '').strip() == target_name and 
                 record.get('Type') == 'Leave' and 
                 record.get('Results') == 'Approved'):
                 
@@ -2148,17 +2160,31 @@ def get_total_attendance_detail():
         df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
         df_sign['date'] = df_sign['attendance_time'].dt.date
         
+        target_name = extract_name_from_emp_name(emp_name)
+        
         # Lọc bản ghi của nhân viên trong ngày
-        mask = (df_sign['Name'].astype(str).str.strip() == emp_name.strip()) & (df_sign['date'] == check_date)
+        mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == check_date)
         day_records = df_sign[mask]
         
         if day_records.empty:
             return 'NONE'
+        
+        # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất cho mỗi loại (sáng/chiều)
+        morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
+        afternoon_records = day_records[day_records['attendance_time'].dt.hour >= 12]
+        
+        morning_times = []
+        afternoon_times = []
+        
+        if not morning_records.empty:
+            # Lấy thời gian sớm nhất trong buổi sáng
+            earliest_morning = morning_records['attendance_time'].min()
+            morning_times.append(earliest_morning.time())
             
-        # Phân tích thời gian để xác định ca
-        times = day_records['attendance_time'].dt.time.tolist()
-        morning_times = [t for t in times if t.hour < 12]  # Trước 12h
-        afternoon_times = [t for t in times if t.hour >= 12]  # Từ 12h trở đi
+        if not afternoon_records.empty:
+            # Lấy thời gian sớm nhất trong buổi chiều
+            earliest_afternoon = afternoon_records['attendance_time'].min()
+            afternoon_times.append(earliest_afternoon.time())
         
         if morning_times and afternoon_times:
             return 'FULL'  # Có cả sáng và chiều
@@ -2183,8 +2209,15 @@ def get_total_attendance_detail():
             day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
             dt_date = dt.date()
             
-            # Chỉ tính cho ngày làm việc (Weekday) và không phải ngày lễ
-            if day_type == 'Weekday':
+            # Sửa logic: Tính cho ngày làm việc bình thường theo yêu cầu
+            # 1. Là ngày trong tuần (Thứ 2-6) VÀ không phải ngày nghỉ lễ
+            # 2. Là ngày cuối tuần nhưng được quy định là "ngày làm việc đặc biệt"
+            is_normal_workday = (
+                (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
+                (day_type == 'Weekend' and dt_date in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
+            )
+            
+            if is_normal_workday:
                 # Kiểm tra các điều kiện
                 has_ot = has_ot_on_date(emp_name, dt_date, otlieu_data)
                 has_lieu = is_lieu_day(emp_name, dt_date, otlieu_data)
@@ -2201,8 +2234,9 @@ def get_total_attendance_detail():
                         normal_days += 0.5  # Một ca
 
         # Tính các loại leave từ apply_data
+        target_name = extract_name_from_emp_name(emp_name)
         for record in apply_data:
-            if (record.get('Name', '').strip() == emp_name.strip() and 
+            if (record.get('Name', '').strip() == target_name and 
                 record.get('Type') == 'Leave' and 
                 record.get('Results') == 'Approved'):
                 
@@ -2273,13 +2307,39 @@ def get_total_attendance_detail():
 
         for dt in date_range:
             day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
-            if day_type == 'Weekday':
+            # Chỉ tính violation cho ngày làm việc bình thường
+            is_normal_workday = (
+                (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
+                (day_type == 'Weekend' and dt.date() in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
+            )
+            
+            if is_normal_workday:
                 # Lấy tất cả bản ghi của nhân viên này trong ngày dt
-                mask = (df_sign['Name'].astype(str).str.strip() == emp_name.strip()) & (df_sign['date'] == dt.date())
+                mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == dt.date())
                 day_records = df_sign[mask]
                 if not day_records.empty:
-                    in_time = day_records['attendance_time'].min()
-                    out_time = day_records['attendance_time'].max()
+                    # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất và muộn nhất
+                    morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
+                    afternoon_records = day_records[day_records['attendance_time'].dt.hour >= 12]
+                    
+                    in_time = None
+                    out_time = None
+                    
+                    if not morning_records.empty:
+                        in_time = morning_records['attendance_time'].min()  # Thời gian sớm nhất buổi sáng
+                    
+                    if not afternoon_records.empty:
+                        out_time = afternoon_records['attendance_time'].max()  # Thời gian muộn nhất buổi chiều
+                    
+                    # Nếu không có dữ liệu sáng/chiều rõ ràng, lấy min/max của cả ngày
+                    if in_time is None and out_time is None:
+                        in_time = day_records['attendance_time'].min()
+                        out_time = day_records['attendance_time'].max()
+                    elif in_time is None:
+                        in_time = out_time
+                    elif out_time is None:
+                        out_time = in_time
+                    
                     # Đi muộn
                     if in_time.hour > 8 or (in_time.hour == 8 and in_time.minute > 30):
                         late_minutes = (in_time.hour - 8) * 60 + (in_time.minute - 30)
@@ -2403,11 +2463,21 @@ def get_attendance_report():
             return 'Weekend'
         return 'Weekday'
 
+    # Hàm xử lý matching tên nhân viên
+    def extract_name_from_emp_name(emp_name):
+        # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
+        import re
+        match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
+        if match:
+            return match.group(1).strip()
+        return emp_name.strip()
+
     # Hàm kiểm tra có Lieu trong ngày không
     def is_lieu_day(emp_name, check_date, otlieu_data):
+        target_name = extract_name_from_emp_name(emp_name)
         for record in otlieu_data:
             name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == emp_name.strip():
+            if name_val.strip() == target_name:
                 # Kiểm tra các cột Lieu From, Lieu To
                 lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                 for col in lieu_cols:
@@ -2422,9 +2492,10 @@ def get_attendance_report():
 
     # Hàm kiểm tra có OT trong ngày không
     def has_ot_on_date(emp_name, check_date, otlieu_data):
+        target_name = extract_name_from_emp_name(emp_name)
         for record in otlieu_data:
             name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == emp_name.strip():
+            if name_val.strip() == target_name:
                 # Kiểm tra các cột OT Date, Date, OT date
                 ot_date_cols = ['OT Date', 'Date', 'OT date']
                 for col in ot_date_cols:
@@ -2476,8 +2547,9 @@ def get_attendance_report():
     # Hàm kiểm tra Apply data cho ngày
     def get_apply_info_for_date(emp_name, check_date, apply_data):
         """Trả về thông tin apply cho ngày: type, leave_type, is_approved"""
+        target_name = extract_name_from_emp_name(emp_name)
         for record in apply_data:
-            if (record.get('Name', '').strip() == emp_name.strip() and 
+            if (record.get('Name', '').strip() == target_name and 
                 record.get('Results') == 'Approved'):
                 
                 try:
@@ -2537,7 +2609,8 @@ def get_attendance_report():
                         if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
                             df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
                             df_sign['date'] = df_sign['attendance_time'].dt.date
-                            mask = (df_sign['Name'].astype(str).str.strip() == emp_name.strip()) & (df_sign['date'] == day_date)
+                            target_name = extract_name_from_emp_name(emp_name)
+                            mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
                             day_signinout = df_sign[mask]['attendance_time'].tolist()
                     
                     # Lấy thông tin apply cho ngày này
@@ -3068,12 +3141,21 @@ def calculate_total_attendance_detail_for_export():
                 return 'Weekend'
             return 'Weekday'
         
+        def extract_name_from_emp_name(emp_name):
+            # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
+            import re
+            match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
+            if match:
+                return match.group(1).strip()
+            return emp_name.strip()
+
         def is_lieu_day(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in otlieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == emp_name.strip():
+                if name_val.strip() == target_name:
                     lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                     for col in lieu_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3088,9 +3170,10 @@ def calculate_total_attendance_detail_for_export():
         def has_ot_on_date(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in otlieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == emp_name.strip():
+                if name_val.strip() == target_name:
                     ot_date_cols = ['OT Date', 'Date', 'OT date']
                     for col in ot_date_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3105,8 +3188,9 @@ def calculate_total_attendance_detail_for_export():
         def has_apply_leave_on_date(emp_name, check_date, apply_data):
             if apply_data is None or apply_data.empty:
                 return False
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in apply_data.iterrows():
-                if (record.get('Name', '').strip() == emp_name.strip() and 
+                if (record.get('Name', '').strip() == target_name and 
                     record.get('Results') == 'Approved' and
                     record.get('Type') == 'Leave'):
                     
@@ -3134,8 +3218,9 @@ def calculate_total_attendance_detail_for_export():
             if signinout_data is None or signinout_data.empty:
                 return 'NONE'
             
+            target_name = extract_name_from_emp_name(emp_name)
             day_records = signinout_data[
-                (signinout_data['Name'].astype(str).str.strip() == emp_name.strip()) &
+                (signinout_data['Name'].astype(str).str.strip() == target_name) &
                 (pd.to_datetime(signinout_data['attendance_time'], errors='coerce').dt.date == check_date)
             ]
             
@@ -3183,7 +3268,15 @@ def calculate_total_attendance_detail_for_export():
                 day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
                 day_date = dt.date()
                 
-                if (day_type == 'Weekday' and 
+                # Sửa logic: Tính cho ngày làm việc bình thường theo yêu cầu
+                # 1. Là ngày trong tuần (Thứ 2-6) VÀ không phải ngày nghỉ lễ
+                # 2. Là ngày cuối tuần nhưng được quy định là "ngày làm việc đặc biệt"
+                is_normal_workday = (
+                    (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
+                    (day_type == 'Weekend' and day_date in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
+                )
+                
+                if (is_normal_workday and 
                     not is_lieu_day(emp_name, day_date, otlieu_data) and
                     not has_ot_on_date(emp_name, day_date, otlieu_data) and
                     not has_apply_leave_on_date(emp_name, day_date, apply_data)):
@@ -3196,8 +3289,9 @@ def calculate_total_attendance_detail_for_export():
             
             # Calculate leave days from apply data
             if apply_data is not None and not apply_data.empty:
+                target_name = extract_name_from_emp_name(emp_name)
                 emp_apply_data = apply_data[
-                    (apply_data['Name'].astype(str).str.strip() == emp_name.strip()) &
+                    (apply_data['Name'].astype(str).str.strip() == target_name) &
                     (apply_data['Results'] == 'Approved') &
                     (apply_data['Type'] == 'Leave')
                 ]
@@ -3360,12 +3454,21 @@ def calculate_attendance_report_for_export():
                 return 'Weekend'
             return 'Weekday'
         
+        def extract_name_from_emp_name(emp_name):
+            # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
+            import re
+            match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
+            if match:
+                return match.group(1).strip()
+            return emp_name.strip()
+
         def is_lieu_day(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in otlieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == emp_name.strip():
+                if name_val.strip() == target_name:
                     lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                     for col in lieu_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3380,9 +3483,10 @@ def calculate_attendance_report_for_export():
         def has_ot_on_date(emp_name, check_date, otlieu_data):
             if otlieu_data is None or otlieu_data.empty:
                 return False
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in otlieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == emp_name.strip():
+                if name_val.strip() == target_name:
                     ot_date_cols = ['OT Date', 'Date', 'OT date']
                     for col in ot_date_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3426,8 +3530,9 @@ def calculate_attendance_report_for_export():
         def get_apply_info_for_date(emp_name, check_date, apply_data):
             if apply_data is None or apply_data.empty:
                 return None
+            target_name = extract_name_from_emp_name(emp_name)
             for _, record in apply_data.iterrows():
-                if (record.get('Name', '').strip() == emp_name.strip() and 
+                if (record.get('Name', '').strip() == target_name and 
                     record.get('Results') == 'Approved'):
                     
                     try:
@@ -3486,7 +3591,8 @@ def calculate_attendance_report_for_export():
                             if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
                                 df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
                                 df_sign['date'] = df_sign['attendance_time'].dt.date
-                                mask = (df_sign['Name'].astype(str).str.strip() == emp_name.strip()) & (df_sign['date'] == day_date)
+                                target_name = extract_name_from_emp_name(emp_name)
+                                mask = (df_sign['Name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
                                 day_signinout = df_sign[mask]['attendance_time'].tolist()
                         
                         # Get apply info for this day
@@ -3501,8 +3607,17 @@ def calculate_attendance_report_for_export():
                                 row[day_str] = 'L'  # Leave
                             elif apply_type == 'Supplement':
                                 if day_signinout:
-                                    check_in = min(day_signinout)
-                                    check_out = max(day_signinout)
+                                    # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất và muộn nhất
+                                    morning_times = [t for t in day_signinout if t.hour < 12]
+                                    afternoon_times = [t for t in day_signinout if t.hour >= 12]
+                                    
+                                    if morning_times and afternoon_times:
+                                        check_in = min(morning_times)  # Thời gian sớm nhất buổi sáng
+                                        check_out = max(afternoon_times)  # Thời gian muộn nhất buổi chiều
+                                    else:
+                                        check_in = min(day_signinout)
+                                        check_out = max(day_signinout)
+                                    
                                     actual_hours, late_minutes = calculate_actual_hours(check_in, check_out)
                                     
                                     if actual_hours >= 8:
@@ -3535,9 +3650,9 @@ def calculate_attendance_report_for_export():
                             row[day_str] = 'H'  # Holiday
                         elif day_type == 'Weekend':
                             row[day_str] = 'W'  # Weekend
-                        elif is_lieu_day(emp_name, day_date, otlieu_data):
+                        elif is_lieu_day(emp_name, day_date, ot_lieu_data):
                             row[day_str] = 'LE'  # Lieu
-                        elif has_ot_on_date(emp_name, day_date, otlieu_data):
+                        elif has_ot_on_date(emp_name, day_date, ot_lieu_data):
                             row[day_str] = 'OT'  # OT
                         else:
                             row[day_str] = ''  # Empty
