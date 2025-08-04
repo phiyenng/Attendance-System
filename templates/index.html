@@ -151,10 +151,10 @@
         
         #attendanceReportTab .table-responsive th[data-col="Name"],
         #attendanceReportTab .table-responsive td[data-col="Name"] {
-            width: 150px !important;
-            min-width: 150px !important;
-            max-width: 150px !important;
-            padding: 2px !important;
+            width: 160px !important;
+            min-width: 160px !important;
+            max-width: 160px !important;
+            padding: 4px !important;
             white-space: nowrap !important;
         }
         
@@ -3207,19 +3207,26 @@
                                          html += `<th></th><th></th><th></th>`; // LateSoon summary
                      html += `</tr></thead><tbody>`;
                      
-                     // Body: mỗi nhân viên 2 dòng (sáng/chiều)
+                     // Body: hiển thị dữ liệu từ backend (đã có sẵn 2 dòng cho mỗi nhân viên)
                      const start = (page - 1) * pageSize;
                      const end = Math.min(start + pageSize, rows.length);
                      for (let i = start; i < end; i++) {
                          let row = rows[i];
-                         for (let shift = 0; shift < 2; shift++) {
-                             html += `<tr>`;
-                             if (shift === 0) {
-                                 html += `<td rowspan="2" style="background:#fff;vertical-align:middle;text-align:center;" data-col="Department">${row[0]}</td>`;
-                                 html += `<td rowspan="2" style="background:#fff;vertical-align:middle;text-align:left;" data-col="Name">${row[1]}</td>`;
+                         html += `<tr>`;
+                         
+                         // Department và Name (chỉ hiển thị ở dòng đầu tiên của mỗi nhân viên)
+                         if (i % 2 === 0) {
+                             // Tìm dòng tiếp theo để tính rowspan
+                             let rowspan = 1;
+                             if (i + 1 < rows.length && rows[i + 1][1] === row[1]) {
+                                 rowspan = 2;
                              }
-                             for (let d = dayStartIdx; d < dayEndIdx; d++) {
-                                 let val = row[d] && Array.isArray(row[d]) ? row[d][shift] : row[d];
+                             html += `<td rowspan="${rowspan}" style="background:#fff;vertical-align:middle;text-align:center;" data-col="Department">${row[0]}</td>`;
+                             html += `<td rowspan="${rowspan}" style="background:#fff;vertical-align:middle;text-align:left;" data-col="Name">${row[1]}</td>`;
+                         }
+                         
+                         for (let d = dayStartIdx; d < dayEndIdx; d++) {
+                             let val = row[d];
                                  let cellColor = '';
                                  
                                  // Logic tô màu dựa trên giá trị
@@ -3253,22 +3260,27 @@
                                  html += `<td style="text-align:center;${cellColor}" data-col="${columns[d]}">${val || ''}</td>`;
                              }
                              
-                             // Tổng hợp
-                             if (shift === 0) {
+                             // Tổng hợp (chỉ hiển thị ở dòng đầu tiên của mỗi nhân viên)
+                             if (i % 2 === 0) {
+                                 // Tìm dòng tiếp theo để tính rowspan
+                                 let rowspan = 1;
+                                 if (i + 1 < rows.length && rows[i + 1][1] === row[1]) {
+                                     rowspan = 2;
+                                 }
+                                 
                                  for (let d = dayEndIdx; d < columns.length; d++) {
                                      let colName = columns[d];
                                      if (colName === 'Late/Soon') {
                                          // Hiển thị 3 cột cho Late/Soon
-                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">${row[d]}</td>`; // Times 1
-                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">0</td>`; // Times 2
-                                         html += `<td rowspan="2" style="text-align:center;" data-col="Late/Soon">0</td>`; // Minus
+                                         html += `<td rowspan="${rowspan}" style="text-align:center;" data-col="Late/Soon">${row[d]}</td>`; // Times 1
+                                         html += `<td rowspan="${rowspan}" style="text-align:center;" data-col="Late/Soon">0</td>`; // Times 2
+                                         html += `<td rowspan="${rowspan}" style="text-align:center;" data-col="Late/Soon">0</td>`; // Minus
                                      } else {
-                                         html += `<td rowspan="2" style="text-align:center;" data-col="${colName}">${row[d]}</td>`;
+                                         html += `<td rowspan="${rowspan}" style="text-align:center;" data-col="${colName}">${row[d]}</td>`;
                                      }
                                  }
                              }
                              html += `</tr>`;
-                         }
                      }
                      html += `</tbody></table></div>`;
                      

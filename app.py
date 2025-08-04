@@ -764,8 +764,8 @@ def export():
         try:
             # 1. Employee List
             if employee_list_df is not None and not employee_list_df.empty:
-                if 'Employee List' in workbook.sheetnames:
-                    worksheet = workbook['Employee List']
+                if 'Emp List' in workbook.sheetnames:
+                    worksheet = workbook['Emp List']
                     # Clear existing data (keep headers)
                     for row in worksheet.iter_rows(min_row=2):
                         for cell in row:
@@ -790,8 +790,8 @@ def export():
             
             # 3. Sign In-Out Data
             if sign_in_out_data is not None and not sign_in_out_data.empty:
-                if 'Sign In-Out Data' in workbook.sheetnames:
-                    worksheet = workbook['Sign In-Out Data']
+                if 'Sign in-out data' in workbook.sheetnames:
+                    worksheet = workbook['Sign in-out data']
                     # Clear existing data (keep headers)
                     for row in worksheet.iter_rows(min_row=2):
                         for cell in row:
@@ -803,8 +803,8 @@ def export():
             
             # 4. Apply Data
             if apply_data is not None and not apply_data.empty:
-                if 'Apply Data' in workbook.sheetnames:
-                    worksheet = workbook['Apply Data']
+                if 'Apply data' in workbook.sheetnames:
+                    worksheet = workbook['Apply data']
                     # Clear existing data (keep headers)
                     for row in worksheet.iter_rows(min_row=2):
                         for cell in row:
@@ -816,8 +816,8 @@ def export():
             
             # 5. OT Lieu Data
             if ot_lieu_data is not None and not ot_lieu_data.empty:
-                if 'OT Lieu Data' in workbook.sheetnames:
-                    worksheet = workbook['OT Lieu Data']
+                if 'OT Lieu data' in workbook.sheetnames:
+                    worksheet = workbook['OT Lieu data']
                     # Clear existing data (keep headers)
                     for row in worksheet.iter_rows(min_row=2):
                         for cell in row:
@@ -879,8 +879,8 @@ def export():
                 if isinstance(otlieu_report_result, dict) and 'columns' in otlieu_report_result and 'rows' in otlieu_report_result:
                     otlieu_report_df = pd.DataFrame(otlieu_report_result['rows'], columns=otlieu_report_result['columns'])
                     if not otlieu_report_df.empty:
-                        if 'OT Lieu Report' in workbook.sheetnames:
-                            worksheet = workbook['OT Lieu Report']
+                        if 'OT & Lieu Report' in workbook.sheetnames:
+                            worksheet = workbook['OT & Lieu Report']
                             # Clear existing data (keep headers)
                             for row in worksheet.iter_rows(min_row=2):
                                 for cell in row:
@@ -909,8 +909,8 @@ def export():
                 if isinstance(total_attendance_result, dict) and 'columns' in total_attendance_result and 'rows' in total_attendance_result:
                     total_attendance_df = pd.DataFrame(total_attendance_result['rows'], columns=total_attendance_result['columns'])
                     if not total_attendance_df.empty:
-                        if 'Total Attendance Detail' in workbook.sheetnames:
-                            worksheet = workbook['Total Attendance Detail']
+                        if 'Total Attendance detail' in workbook.sheetnames:
+                            worksheet = workbook['Total Attendance detail']
                             # Clear existing data (keep headers)
                             for row in worksheet.iter_rows(min_row=2):
                                 for cell in row:
@@ -3350,8 +3350,8 @@ def calculate_total_attendance_detail_for_export():
                 )
                 
                 if (is_normal_workday and 
-                    not is_lieu_day(emp_name, day_date, otlieu_data) and
-                    not has_ot_on_date(emp_name, day_date, otlieu_data) and
+                    not is_lieu_day(emp_name, day_date, ot_lieu_data) and
+                    not has_ot_on_date(emp_name, day_date, ot_lieu_data) and
                     not has_apply_leave_on_date(emp_name, day_date, apply_data)):
                     
                     shift_info = get_shift_info(emp_name, day_date, signinout_data)
@@ -3450,6 +3450,8 @@ def calculate_total_attendance_detail_for_export():
         
     except Exception as e:
         print(f"Error in calculate_total_attendance_detail_for_export: {e}")
+        import traceback
+        traceback.print_exc()
         return {'columns': [], 'rows': []}
 
 def calculate_attendance_report_for_export():
