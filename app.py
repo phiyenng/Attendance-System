@@ -666,271 +666,103 @@ def clear_otlieu():
 
 @app.route('/export', methods=['GET'])
 def export():
-    """Export processed data as Excel file using existing template"""
-    global sign_in_out_data, apply_data, ot_lieu_data, abnormal_data, employee_list_df, rules
-    
+    """
+    Export processed data as Excel file using existing template.
+    Write data to existing sheets, keep all formatting/colors.
+    """
+    global sign_in_out_data, apply_data, ot_lieu_data, employee_list_df, rules
+
     try:
-        if sign_in_out_data is None or sign_in_out_data.empty:
-            temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
-            if os.path.exists(temp_signinout_path):
-                sign_in_out_data = pd.read_excel(temp_signinout_path)
-        
-        if apply_data is None or apply_data.empty:
-            temp_apply_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
-            if os.path.exists(temp_apply_path):
-                apply_data = pd.read_excel(temp_apply_path)
-        
-        if ot_lieu_data is None or ot_lieu_data.empty:
-            temp_otlieu_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
-            if os.path.exists(temp_otlieu_path):
-                ot_lieu_data = pd.read_excel(temp_otlieu_path)
-        
-        if employee_list_df is None or employee_list_df.empty:
-            emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
-            if os.path.exists(emp_path):
-                employee_list_df = pd.read_csv(emp_path, dtype=str)
-        
-        if rules is None or rules.empty:
-            rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
-            if os.path.exists(rules_path):
-                rules = pd.read_excel(rules_path)
-        
+        # Đường dẫn template gốc
         template_path = os.path.join(app.config['UPLOAD_FOLDER'], 'AttendanceReport.xlsx')
         if not os.path.exists(template_path):
             return jsonify({'error': 'Template file AttendanceReport.xlsx not found'}), 400
-        
+
+        # Tạo file mới từ template
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"AttendanceReport_{timestamp}.xlsx"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
         import shutil
         shutil.copy2(template_path, file_path)
-        
+
+        # Load workbook với openpyxl (giữ định dạng)
         from openpyxl import load_workbook
-        workbook = load_workbook(file_path)
-        
-        # Update data in existing sheets
-        try:
-            # 1. Employee List
-            if employee_list_df is not None and not employee_list_df.empty:
-                if 'Emp List' in workbook.sheetnames:
-                    worksheet = workbook['Emp List']
-                    # Clear existing data (keep headers)
-                    for row in worksheet.iter_rows(min_row=2):
-                        for cell in row:
-                            cell.value = None
-                    # Write new data
-                    for idx, row in employee_list_df.iterrows():
-                        for col_idx, value in enumerate(row, 1):
-                            worksheet.cell(row=idx+2, column=col_idx, value=value)
-            
-            # 2. Rules
-            if rules is not None and not rules.empty:
-                if 'Rules' in workbook.sheetnames:
-                    worksheet = workbook['Rules']
-                    # Clear existing data (keep headers)
-                    for row in worksheet.iter_rows(min_row=2):
-                        for cell in row:
-                            cell.value = None
-                    # Write new data
-                    for idx, row in rules.iterrows():
-                        for col_idx, value in enumerate(row, 1):
-                            worksheet.cell(row=idx+2, column=col_idx, value=value)
-            
-            # 3. Sign In-Out Data
-            if sign_in_out_data is not None and not sign_in_out_data.empty:
-                if 'Sign in-out data' in workbook.sheetnames:
-                    worksheet = workbook['Sign in-out data']
-                    # Clear existing data (keep headers)
-                    for row in worksheet.iter_rows(min_row=2):
-                        for cell in row:
-                            cell.value = None
-                    # Write new data
-                    for idx, row in sign_in_out_data.iterrows():
-                        for col_idx, value in enumerate(row, 1):
-                            worksheet.cell(row=idx+2, column=col_idx, value=value)
-            
-            # 4. Apply Data
-            if apply_data is not None and not apply_data.empty:
-                if 'Apply data' in workbook.sheetnames:
-                    worksheet = workbook['Apply data']
-                    # Clear existing data (keep headers)
-                    for row in worksheet.iter_rows(min_row=2):
-                        for cell in row:
-                            cell.value = None
-                    # Write new data
-                    for idx, row in apply_data.iterrows():
-                        for col_idx, value in enumerate(row, 1):
-                            worksheet.cell(row=idx+2, column=col_idx, value=value)
-            
-            # 5. OT Lieu Data
-            if ot_lieu_data is not None and not ot_lieu_data.empty:
-                if 'OT Lieu data' in workbook.sheetnames:
-                    worksheet = workbook['OT Lieu data']
-                    # Clear existing data (keep headers)
-                    for row in worksheet.iter_rows(min_row=2):
-                        for cell in row:
-                            cell.value = None
-                    
-                    # Process OT Lieu data to handle error/warning objects
-                    otlieu_export_df = ot_lieu_data.copy()
-                    
-                    # Convert error/warning objects to display strings
-                    for col in otlieu_export_df.columns:
-                        for idx in otlieu_export_df.index:
-                            cell_value = otlieu_export_df.at[idx, col]
-                            if isinstance(cell_value, dict):
-                                if 'error' in cell_value:
-                                    otlieu_export_df.at[idx, col] = f"ERROR: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
-                                elif 'warning' in cell_value:
-                                    otlieu_export_df.at[idx, col] = f"WARNING: {cell_value.get('value', '')} (Suggest: {cell_value.get('suggest', '')})"
-                                elif 'gray' in cell_value:
-                                    otlieu_export_df.at[idx, col] = f"GRAY: {cell_value.get('value', '')}"
-                                else:
-                                    otlieu_export_df.at[idx, col] = str(cell_value.get('value', ''))
-                    
-                    # Write new data
-                    for idx, row in otlieu_export_df.iterrows():
-                        for col_idx, value in enumerate(row, 1):
-                            worksheet.cell(row=idx+2, column=col_idx, value=value)
-            
-            # 6. OT Lieu Before (calculated)
+        wb = load_workbook(file_path)
+
+        # Helper: Ghi DataFrame vào worksheet, giữ header, chỉ ghi dữ liệu từ dòng 2
+        def write_df_to_sheet(ws, df, start_row=2):
+            # Xóa dữ liệu cũ (giữ header)
+            for row in ws.iter_rows(min_row=start_row, max_row=ws.max_row, max_col=ws.max_column):
+                for cell in row:
+                    cell.value = None
+            # Ghi dữ liệu mới
+            for idx, row in df.iterrows():
+                for col_idx, value in enumerate(row, 1):
+                    ws.cell(row=idx + start_row, column=col_idx, value=value)
+
+        # 1. Employee List
+        if employee_list_df is not None and not employee_list_df.empty and 'Emp List' in wb.sheetnames:
+            write_df_to_sheet(wb['Emp List'], employee_list_df, start_row=2)
+
+        # 2. Rules
+        if rules is not None and not rules.empty and 'Rules' in wb.sheetnames:
+            write_df_to_sheet(wb['Rules'], rules, start_row=2)
+
+        # 3. Sign In-Out Data
+        if sign_in_out_data is not None and not sign_in_out_data.empty and 'Sign in-out data' in wb.sheetnames:
+            write_df_to_sheet(wb['Sign in-out data'], sign_in_out_data, start_row=2)
+
+        # 4. Apply Data
+        if apply_data is not None and not apply_data.empty and 'Apply data' in wb.sheetnames:
+            write_df_to_sheet(wb['Apply data'], apply_data, start_row=2)
+
+        # 6. OT Lieu Before (calculated)
+        if 'OT Lieu Before' in wb.sheetnames:
             try:
-                print("Calculating OT Lieu Before...")
                 otlieu_before_df = calculate_otlieu_before()
-                print(f"OT Lieu Before result: {otlieu_before_df.shape if otlieu_before_df is not None else 'None'}")
                 if otlieu_before_df is not None and not otlieu_before_df.empty:
-                    if 'OT Lieu Before' in workbook.sheetnames:
-                        worksheet = workbook['OT Lieu Before']
-                        # Clear existing data (keep headers)
-                        for row in worksheet.iter_rows(min_row=2):
-                            for cell in row:
-                                cell.value = None
-                        # Write new data
-                        for idx, row in otlieu_before_df.iterrows():
-                            for col_idx, value in enumerate(row, 1):
-                                worksheet.cell(row=idx+2, column=col_idx, value=value)
-                        print("OT Lieu Before exported successfully")
-                    else:
-                        print("OT Lieu Before sheet not found in template")
-                else:
-                    print("OT Lieu Before DataFrame is empty or None")
+                    write_df_to_sheet(wb['OT Lieu data'], otlieu_before_df, start_row=3)
             except Exception as e:
                 print(f"Error calculating OT Lieu Before: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # 7. OT Lieu Report (calculated)
+
+        # 7. OT Lieu Report (calculated)
+        if 'OT & Lieu Report' in wb.sheetnames:
             try:
-                print("Calculating OT Lieu Report...")
                 otlieu_report_result = calculate_otlieu_report_for_export()
-                print(f"OT Lieu Report result: {otlieu_report_result}")
                 if isinstance(otlieu_report_result, dict) and 'columns' in otlieu_report_result and 'rows' in otlieu_report_result:
                     otlieu_report_df = pd.DataFrame(otlieu_report_result['rows'], columns=otlieu_report_result['columns'])
                     if not otlieu_report_df.empty:
-                        if 'OT & Lieu Report' in workbook.sheetnames:
-                            worksheet = workbook['OT & Lieu Report']
-                            # Clear existing data (keep headers)
-                            for row in worksheet.iter_rows(min_row=2):
-                                for cell in row:
-                                    cell.value = None
-                            # Write new data
-                            for idx, row in otlieu_report_df.iterrows():
-                                for col_idx, value in enumerate(row, 1):
-                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
-                            print("OT Lieu Report exported successfully")
-                        else:
-                            print("OT Lieu Report sheet not found in template")
-                    else:
-                        print("OT Lieu Report DataFrame is empty")
-                else:
-                    print(f"OT Lieu Report result is not valid: {type(otlieu_report_result)}")
+                        write_df_to_sheet(wb['OT & Lieu Report'], otlieu_report_df, start_row=9)
             except Exception as e:
                 print(f"Error calculating OT Lieu Report: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # 8. Total Attendance Detail (calculated)
+
+        # 8. Total Attendance Detail (calculated)
+        if 'Total Attendance detail' in wb.sheetnames:
             try:
-                print("Calculating Total Attendance Detail...")
                 total_attendance_result = calculate_total_attendance_detail_for_export()
-                print(f"Total Attendance Detail result: {total_attendance_result}")
                 if isinstance(total_attendance_result, dict) and 'columns' in total_attendance_result and 'rows' in total_attendance_result:
                     total_attendance_df = pd.DataFrame(total_attendance_result['rows'], columns=total_attendance_result['columns'])
                     if not total_attendance_df.empty:
-                        if 'Total Attendance detail' in workbook.sheetnames:
-                            worksheet = workbook['Total Attendance detail']
-                            # Clear existing data (keep headers)
-                            for row in worksheet.iter_rows(min_row=2):
-                                for cell in row:
-                                    cell.value = None
-                            # Write new data
-                            for idx, row in total_attendance_df.iterrows():
-                                for col_idx, value in enumerate(row, 1):
-                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
-                            print("Total Attendance Detail exported successfully")
-                        else:
-                            print("Total Attendance Detail sheet not found in template")
-                    else:
-                        print("Total Attendance Detail DataFrame is empty")
-                else:
-                    print(f"Total Attendance Detail result is not valid: {type(total_attendance_result)}")
+                        write_df_to_sheet(wb['Total Attendance detail'], total_attendance_df, start_row=5)
             except Exception as e:
                 print(f"Error calculating Total Attendance Detail: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # 9. Attendance Report (calculated)
+
+        # 9. Attendance Report (calculated)
+        if 'Attendance Report' in wb.sheetnames:
             try:
-                print("Calculating Attendance Report...")
-                print(f"Global variables - sign_in_out_data: {sign_in_out_data.shape if sign_in_out_data is not None else 'None'}")
-                print(f"Global variables - apply_data: {apply_data.shape if apply_data is not None else 'None'}")
-                print(f"Global variables - ot_lieu_data: {ot_lieu_data.shape if ot_lieu_data is not None else 'None'}")
-                print(f"Global variables - employee_list_df: {employee_list_df.shape if employee_list_df is not None else 'None'}")
-                print(f"Global variables - rules: {rules.shape if rules is not None else 'None'}")
-                
                 attendance_report_result = calculate_attendance_report_for_export()
-                print(f"Attendance Report result: {attendance_report_result}")
-                print(f"Attendance Report result type: {type(attendance_report_result)}")
-                
                 if isinstance(attendance_report_result, dict) and 'columns' in attendance_report_result and 'rows' in attendance_report_result:
-                    print(f"Attendance Report columns: {attendance_report_result['columns']}")
-                    print(f"Attendance Report rows count: {len(attendance_report_result['rows'])}")
                     attendance_report_df = pd.DataFrame(attendance_report_result['rows'], columns=attendance_report_result['columns'])
                     if not attendance_report_df.empty:
-                        if 'Attendance Report' in workbook.sheetnames:
-                            worksheet = workbook['Attendance Report']
-                            # Clear existing data (keep headers)
-                            for row in worksheet.iter_rows(min_row=2):
-                                for cell in row:
-                                    cell.value = None
-                            # Write new data
-                            for idx, row in attendance_report_df.iterrows():
-                                for col_idx, value in enumerate(row, 1):
-                                    worksheet.cell(row=idx+2, column=col_idx, value=value)
-                            print("Attendance Report exported successfully")
-                        else:
-                            print("Attendance Report sheet not found in template")
-                    else:
-                        print("Attendance Report DataFrame is empty")
-                else:
-                    print(f"Attendance Report result is not valid: {type(attendance_report_result)}")
+                        write_df_to_sheet(wb['Attendance Report'], attendance_report_df, start_row=7)
             except Exception as e:
                 print(f"Error calculating Attendance Report: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        except Exception as e:
-            print(f"Error updating workbook: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # Save the workbook
-        workbook.save(file_path)
-        workbook.close()
-        
+
+        # Lưu file và trả về
+        wb.save(file_path)
+        wb.close()
         return send_file(file_path, as_attachment=True, download_name=filename)
-    
+
     except Exception as e:
         return jsonify({'error': f'Failed to export file: {str(e)}'}), 400
 
@@ -1529,6 +1361,138 @@ def delete_lieu_followup_row():
             return jsonify({'error': 'Invalid index'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+# ==== TÍNH TOÁN OT LIEU BEFORE (HÀM CHUNG) ====
+def calculate_otlieu_before():
+    global rules
+    
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_excel(path)
+
+    # Load Lieu followup
+    lieu_followup_path = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
+    if os.path.exists(lieu_followup_path):
+        lieu_followup_df = pd.read_excel(lieu_followup_path)
+    else:
+        lieu_followup_df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
+    
+    # Load rules if not loaded
+    if rules is None or rules.empty:
+        rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
+        if os.path.exists(rules_path):
+            rules = pd.read_excel(rules_path)
+            print(f"Loaded rules from file: {len(rules)} rows")
+        else:
+            rules = pd.DataFrame()
+            print("Rules file not found, using empty DataFrame")
+    else:
+        print(f"Using existing rules: {len(rules)} rows")
+
+    # Build remain map: {name: remain}
+    lieu_remain_map = {}
+    if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
+        for _, r in lieu_followup_df.iterrows():
+            name = str(r['Name']).strip()
+            try:
+                remain = float(r['Lieu remain previous month'])
+            except:
+                remain = 0.0
+            lieu_remain_map[name] = remain
+
+    ot_payment_types = [
+        'Weekday Rate 150%',
+        'Weekday-night Rate 200%',
+        'Weekend Rate 200%',
+        'Weekend-night Rate 270%',
+        'Holiday Rate 300%',
+        'Holiday-night Rate 390%',
+    ]
+    change_in_lieu_types = ot_payment_types.copy()
+    for col in ot_payment_types:
+        df['OT Payment: ' + col] = 0.0
+    for col in change_in_lieu_types:
+        df['Change in lieu: ' + col] = 0.0
+
+    # Hàm xác định loại ngày
+    def get_day_type(dt, holidays, special_weekends, special_workdays):
+        if dt in holidays:
+            return 'Holiday'
+        if dt in special_workdays:
+            return 'Weekday'
+        if dt in special_weekends:
+            return 'Weekend'
+        if dt.weekday() >= 5:
+            return 'Weekend'
+        return 'Weekday'
+
+    holidays = set()
+    special_workdays = set()
+    special_weekends = set()
+    try:
+        if rules is not None:
+            if 'Holiday Date in This Year' in rules.columns:
+                holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
+            if 'Special Work Day' in rules.columns:
+                special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+            if 'Special Weekend' in rules.columns:
+                special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
+    except: pass
+
+    # --- BẮT ĐẦU LOGIC TÍNH OT RATES ---
+    for idx, row in df.iterrows():
+        emp_id = row['Emp ID'] if 'Emp ID' in row else None
+        intern = is_intern(emp_id, employee_list_df)
+        
+        # Ưu tiên lấy từ cột 'Date', sau đó 'OT date', sau đó 'Lieu Date'
+        ot_date = None
+        if 'Date' in df.columns and pd.notna(row.get('Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Date']).date()
+            except:
+                pass
+        elif 'OT date' in df.columns and pd.notna(row.get('OT date', None)):
+            try:
+                ot_date = pd.to_datetime(row['OT date']).date()
+            except:
+                pass
+        elif 'Lieu Date' in df.columns and pd.notna(row.get('Lieu Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Lieu Date']).date()
+            except:
+                pass
+        if ot_date is None:
+            continue
+
+        # Lấy OT From và OT To
+        ot_from, ot_to = None, None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'from' in col.lower():
+                ot_from = row[col]
+            if 'ot' in col.lower() and 'to' in col.lower():
+                ot_to = row[col]
+        if not ot_from or not ot_to or pd.isna(ot_from) or pd.isna(ot_to):
+            continue
+        try:
+            t1 = pd.to_datetime(str(ot_from), format='%H:%M')
+            t2 = pd.to_datetime(str(ot_to), format='%H:%M')
+        except:
+            continue
+        if t2 < t1:
+            t2 += pd.Timedelta(days=1)
+
+        # Tính OT theo từng block thời gian
+        cur = t1
+        while cur < t2:
+            hour = cur.hour + cur.minute / 60
+            if 6 <= hour < 22:
+                block_end = min(cur.replace(hour=22, minute=0), t2)
+                block_type = 'day'
+            else:
+                if hour < 6:
+                    next6 = cur.replace(hour=6, minute=0)
+                    if next6 <= cur: next6 += pd.Timedelta(days=1)
 
 # ==== TÍNH TOÁN OT LIEU BEFORE (HÀM CHUNG) ====
 def calculate_otlieu_before():
@@ -2892,6 +2856,9 @@ def save_signinout_changes():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# ========================
+# EXPORT ROUTES
+# ========================
 def calculate_otlieu_report_for_export():
     """Calculate OT Lieu Report data for export (without request context)"""
     global ot_lieu_data, employee_list_df, rules
@@ -3149,14 +3116,14 @@ def calculate_total_attendance_detail_for_export():
                         continue
             return False
         
-        def get_shift_info(emp_name, check_date, signinout_data):
-            if signinout_data is None or signinout_data.empty:
+        def get_shift_info(emp_name, check_date, sign_in_out_data):
+            if sign_in_out_data is None or sign_in_out_data.empty:
                 return 'NONE'
             
             target_name = extract_name_from_emp_name(emp_name)
-            day_records = signinout_data[
-                (signinout_data['emp_name'].astype(str).str.strip() == target_name) &
-                (pd.to_datetime(signinout_data['attendance_time'], errors='coerce').dt.date == check_date)
+            day_records = sign_in_out_data[
+                (sign_in_out_data['emp_name'].astype(str).str.strip() == target_name) &
+                (pd.to_datetime(sign_in_out_data['attendance_time'], errors='coerce').dt.date == check_date)
             ]
             
             if day_records.empty:
@@ -3216,7 +3183,7 @@ def calculate_total_attendance_detail_for_export():
                     not has_ot_on_date(emp_name, day_date, ot_lieu_data) and
                     not has_apply_leave_on_date(emp_name, day_date, apply_data)):
                     
-                    shift_info = get_shift_info(emp_name, day_date, signinout_data)
+                    shift_info = get_shift_info(emp_name, day_date, sign_in_out_data)
                     if shift_info == 'FULL':
                         normal_days += 1.0
                     elif shift_info in ['AM', 'PM']:
@@ -3226,7 +3193,7 @@ def calculate_total_attendance_detail_for_export():
             if apply_data is not None and not apply_data.empty:
                 target_name = extract_name_from_emp_name(emp_name)
                 emp_apply_data = apply_data[
-                    (apply_data['Name'].astype(str).str.strip() == target_name) &
+                    (apply_data['Emp Name'].astype(str).str.strip() == target_name) &
                     (apply_data['Results'] == 'Approved') &
                     (apply_data['Type'] == 'Leave')
                 ]
@@ -3427,11 +3394,11 @@ def calculate_attendance_report_for_export():
                 return match.group(1).strip()
             return emp_name.strip()
         
-        def is_lieu_day(emp_name, check_date, otlieu_data):
-            if otlieu_data is None or otlieu_data.empty:
+        def is_lieu_day(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
             target_name = extract_name_from_emp_name(emp_name)
-            for _, record in otlieu_data.iterrows():
+            for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
                 if name_val.strip() == target_name:
                     lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
@@ -3444,12 +3411,12 @@ def calculate_attendance_report_for_export():
                             except:
                                 continue
             return False
-        
-        def has_ot_on_date(emp_name, check_date, otlieu_data):
-            if otlieu_data is None or otlieu_data.empty:
+
+        def has_ot_on_date(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
             target_name = extract_name_from_emp_name(emp_name)
-            for _, record in otlieu_data.iterrows():
+            for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
                 if name_val.strip() == target_name:
                     ot_date_cols = ['OT Date', 'Date', 'OT date']
@@ -3668,6 +3635,10 @@ def calculate_attendance_report_for_export():
         print(f"Error in calculate_attendance_report_for_export: {e}")
         return {'columns': [], 'rows': []}
 
+
+# ==========================
+# Styling Functions
+# ==========================
 def apply_employee_list_styling(worksheet):
     """Apply styling to Employee List sheet"""
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
