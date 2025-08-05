@@ -717,7 +717,7 @@ def export():
             write_df_to_sheet(wb['Apply data'], apply_data, start_row=2)
 
         # 6. OT Lieu Before (calculated)
-        if 'OT Lieu Before' in wb.sheetnames:
+        if 'OT Lieu data' in wb.sheetnames:
             try:
                 otlieu_before_df = calculate_otlieu_before()
                 if otlieu_before_df is not None and not otlieu_before_df.empty:
@@ -2862,109 +2862,160 @@ def save_signinout_changes():
 def calculate_otlieu_report_for_export():
     """Calculate OT Lieu Report data for export (without request context)"""
     global ot_lieu_data, employee_list_df, rules
-    
+
+    # Đảm bảo dữ liệu đầu vào
     if ot_lieu_data is None or ot_lieu_data.empty:
         temp_otlieu_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
         if os.path.exists(temp_otlieu_path):
             ot_lieu_data = pd.read_excel(temp_otlieu_path)
         else:
             return {'columns': [], 'rows': []}
-    
+
     if employee_list_df is None or employee_list_df.empty:
         emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
         if os.path.exists(emp_path):
             employee_list_df = pd.read_csv(emp_path, dtype=str)
         else:
             return {'columns': [], 'rows': []}
-    
+
     if rules is None or rules.empty:
         rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
         if os.path.exists(rules_path):
             rules = pd.read_excel(rules_path)
         else:
             return {'columns': [], 'rows': []}
-    
+
     try:
-        # Get lieu followup data
+        # Các cột cần thiết
+        ot_payment_cols = [
+            'OT Payment: Weekday Rate 150%',
+            'OT Payment: Weekday-night Rate 200%',
+            'OT Payment: Weekend Rate 200%',
+            'OT Payment: Weekend-night Rate 270%',
+            'OT Payment: Holiday Rate 300%',
+            'OT Payment: Holiday-night Rate 390%',
+        ]
+        lieu_cols = [
+            'Change in lieu: Weekday Rate 150%',
+            'Change in lieu: Weekday-night Rate 200%',
+            'Change in lieu: Weekend Rate 200%',
+            'Change in lieu: Weekend-night Rate 270%',
+            'Change in lieu: Holiday Rate 300%',
+            'Change in lieu: Holiday-night Rate 390%',
+        ]
+
+        # Tính toán OT Lieu Before
+        df = calculate_otlieu_before()
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=['Name'] + ot_payment_cols + lieu_cols)
+
+        # Lấy lieu remain previous month
         lieu_followup_path = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
-        lieu_followup_df = pd.DataFrame()
+        lieu_remain_map = {}
         if os.path.exists(lieu_followup_path):
             lieu_followup_df = pd.read_excel(lieu_followup_path)
-        
-        # Calculate OT Lieu Before first
-        df = calculate_otlieu_before()
-        
-        if df is None or df.empty:
-            return {'columns': [], 'rows': []}
-        
-        # Group by employee
+            if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
+                for _, r in lieu_followup_df.iterrows():
+                    name = str(r['Name']).strip()
+                    try:
+                        remain = float(r['Lieu remain previous month'])
+                    except:
+                        remain = 0.0
+                    lieu_remain_map[name] = remain
+
+        # Chuẩn hóa tên nhân viên
+        df['Name'] = df['Name'].astype(str).str.strip()
+        emp_list = employee_list_df.copy()
+        emp_list['Name'] = emp_list['Name'].astype(str).str.strip()
+
+        # Group theo nhân viên
+        grouped = df.groupby('Name')[ot_payment_cols + lieu_cols].sum().reset_index()
+
+        # Build kết quả cho tất cả nhân viên
         result_rows = []
-        
-        for name in df['Name'].unique():
-            if pd.isna(name) or str(name).strip() == '':
-                continue
-                
-            emp_data = df[df['Name'] == name]
-            
-            # Get lieu remain from followup
-            lieu_remain_prev = 0.0
-            if not lieu_followup_df.empty and 'Name' in lieu_followup_df.columns:
-                followup_row = lieu_followup_df[lieu_followup_df['Name'].astype(str).str.strip() == str(name).strip()]
-                if not followup_row.empty:
-                    lieu_remain_prev = float(followup_row.iloc[0].get('Lieu remain', 0.0))
-            
-            # Calculate totals
-            total_ot_paid = 0.0
-            total_used_hours = 0.0
-            
-            # Sum OT Payment columns
-            ot_payment_cols = [col for col in df.columns if col.startswith('OT Payment:')]
-            for col in ot_payment_cols:
-                total_ot_paid += emp_data[col].sum()
-            
-            # Sum Change in lieu columns
-            lieu_cols = [col for col in df.columns if col.startswith('Change in lieu:')]
-            for col in lieu_cols:
-                total_used_hours += emp_data[col].sum()
-            
-            # Calculate transferred hours
-            transferred_hours = 0.0
-            if total_used_hours > 0 and total_ot_paid == 0:
-                transferred_hours = total_used_hours
-            elif total_ot_paid > 25:
-                transferred_hours = total_ot_paid - 25
-            
-            # Calculate remain unused
-            remain_unused = lieu_remain_prev - total_used_hours
-            
+        for _, emp in emp_list.iterrows():
+            name = emp['Name']
+            emp_id = emp.get('ID Number', '')
             row = {
-                'Name': name,
-                'Lieu remain previous month': round(lieu_remain_prev, 3),
-                'Total used hours in month': round(total_used_hours, 3),
-                'Remain unused time off in lieu': round(remain_unused, 3),
-                'Total OT paid': round(total_ot_paid, 3),
-                'Transferred to normal working hours': round(transferred_hours, 3)
+                'No': int(emp.name) + 1,
+                'Employee ID': emp_id,
+                'Employee Name': name,
+                'Lieu remain previous month': round(lieu_remain_map.get(name, 0.0), 3),
             }
-            
-            # Add individual OT Payment columns
-            for col in ot_payment_cols:
-                row[col] = round(emp_data[col].sum(), 3)
-            
-            # Add individual Change in lieu columns
-            for col in lieu_cols:
-                row[col] = round(emp_data[col].sum(), 3)
-            
+            # Lấy dữ liệu OT/Lieu nếu có
+            emp_data = grouped[grouped['Name'] == name]
+            for col in ot_payment_cols + lieu_cols:
+                row[col] = round(float(emp_data[col].values[0]), 3) if not emp_data.empty and col in emp_data else 0.0
+
+            # Tổng hợp
+            total_ot_paid = sum([row[c] for c in ot_payment_cols])
+            total_used_hours = sum([row[c] for c in lieu_cols])
+            row['Total OT paid'] = round(total_ot_paid, 3)
+            row['Total used hours in month'] = round(total_used_hours, 3)
+            row['Remain unused time off in lieu'] = round(row['Lieu remain previous month'] - total_used_hours, 3)
+            # OVERTIME (For payment)
+            row['OVERTIME (For payment)'] = total_ot_paid
+            # OVERTIME (No pay, For later time in lieu)
+            row['OVERTIME (No pay, For later time in lieu)'] = 0.0  # Nếu có logic riêng, bổ sung ở đây
+            # Time off in lieu (hour)
+            row['Time off in lieu (hour)'] = total_used_hours
+            # Transferred to normal working hours
+            if total_used_hours > 0 and total_ot_paid == 0:
+                row['Transferred to normal working hours'] = total_used_hours
+            elif total_ot_paid > 25:
+                row['Transferred to normal working hours'] = round(total_ot_paid - 25, 3)
+            else:
+                row['Transferred to normal working hours'] = 0.0
+            row['Date'] = ''
+
             result_rows.append(row)
-        
-        if not result_rows:
-            return {'columns': [], 'rows': []}
-        
+
+        # Đảm bảo đúng thứ tự cột
+        col_order = [
+            'No', 'Employee ID', 'Employee Name',
+            'OVERTIME (For payment)', 'OVERTIME (No pay, For later time in lieu)', 'Time off in lieu (hour)',
+            'Remain unused time off in lieu', 'Total OT paid',
+            'OT Payment: Weekday Rate 150%', 'OT Payment: Weekday-night Rate 200%',
+            'OT Payment: Weekend Rate 200%', 'OT Payment: Weekend-night Rate 270%',
+            'OT Payment: Holiday Rate 300%', 'OT Payment: Holiday-night Rate 390%',
+            'Change in lieu: Weekday Rate 150%', 'Change in lieu: Weekday-night Rate 200%',
+            'Change in lieu: Weekend Rate 200%', 'Change in lieu: Weekend-night Rate 270%',
+            'Change in lieu: Holiday Rate 300%', 'Change in lieu: Holiday-night Rate 390%',
+            'Transferred to normal working hours', 'Date', 'Total used hours in month'
+        ]
+        # Đổi tên cột cho thân thiện
+        col_rename = {
+            'OT Payment: Weekday Rate 150%': 'OT weekday 150%',
+            'OT Payment: Weekday-night Rate 200%': 'OT weekday night 200%',
+            'OT Payment: Weekend Rate 200%': 'OT weekly holiday 200%',
+            'OT Payment: Weekend-night Rate 270%': 'OT weekly holiday night 270%',
+            'OT Payment: Holiday Rate 300%': 'OT public holiday 300%',
+            'OT Payment: Holiday-night Rate 390%': 'OT public holiday night 390%',
+            'Change in lieu: Weekday Rate 150%': 'OT weekday 150% (lieu)',
+            'Change in lieu: Weekday-night Rate 200%': 'OT weekday night 200% (lieu)',
+            'Change in lieu: Weekend Rate 200%': 'OT weekly holiday 200% (lieu)',
+            'Change in lieu: Weekend-night Rate 270%': 'OT weekly holiday night 270% (lieu)',
+            'Change in lieu: Holiday Rate 300%': 'OT public holiday 300% (lieu)',
+            'Change in lieu: Holiday-night Rate 390%': 'OT public holiday night 390% (lieu)',
+        }
         result_df = pd.DataFrame(result_rows)
+        result_df = result_df.rename(columns=col_rename)
+        col_order = [
+            'No', 'Employee ID', 'Employee Name',
+            'OVERTIME (For payment)', 'OVERTIME (No pay, For later time in lieu)', 'Time off in lieu (hour)',
+            'Remain unused time off in lieu', 'Total OT paid',
+            'OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%',
+            'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%',
+            'OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)',
+            'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)',
+            'Transferred to normal working hours', 'Date', 'Total used hours in month'
+        ]
+        result_df = result_df[[c for c in col_order if c in result_df.columns]]
+
         cols = list(result_df.columns)
         rows = result_df.fillna('').astype(str).values.tolist()
-        
         return {'columns': cols, 'rows': rows}
-        
+
     except Exception as e:
         print(f"Error in calculate_otlieu_report_for_export: {e}")
         return {'columns': [], 'rows': []}
