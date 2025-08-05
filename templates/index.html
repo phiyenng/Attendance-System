@@ -3229,32 +3229,31 @@
                              let val = row[d];
                                  let cellColor = '';
                                  
-                                 // Logic tô màu dựa trên giá trị
-                                 if (val === 'N') {
-                                     cellColor = 'background:#4caf50;color:#fff;font-weight:bold;'; // Normal - xanh lá
-                                 } else if (val === 'L') {
-                                     cellColor = 'background:#fbc02d;font-weight:bold;'; // Leave - vàng
-                                 } else if (val === 'T') {
-                                     cellColor = 'background:#b39ddb;color:#fff;font-weight:bold;'; // Trip - tím
-                                 } else if (val === 'S') {
-                                     cellColor = 'background:#4dd0e1;font-weight:bold;'; // Supplement - xanh nhạt
-                                 } else if (val === 'LE') {
-                                     cellColor = 'background:#ffd54f;font-weight:bold;'; // Lieu - cam
-                                 } else if (val === 'LS') {
-                                     cellColor = 'background:#29b6f6;color:#fff;font-weight:bold;'; // Late/Soon - xanh dương
-                                 } else if (val === 'OT') {
-                                     cellColor = 'background:#ffb74d;font-weight:bold;'; // OT - cam nhạt
-                                 } else if (val === 'M') {
-                                     cellColor = 'background:#f44336;color:#fff;font-weight:bold;'; // Miss - đỏ
+                                 // Logic tô màu dựa trên giá trị từ backend
+                                 if (val === 'Miss') {
+                                     cellColor = 'background:#ffcdd2;color:#d32f2f;font-weight:bold;'; // Miss - nền đỏ, chữ đỏ đậm
+                                 } else if (val === 'Leave') {
+                                     cellColor = 'background:#ffe0b2;font-weight:bold;'; // Leave - vàng nhạt
+                                 } else if (val === 'Trip') {
+                                     cellColor = 'background:#bbdefb;font-weight:bold;'; // Trip - xanh dương nhạt
+                                 } else if (val === 'Supplement') {
+                                     cellColor = 'background:#c5cae9;font-weight:bold;'; // Supplement - tím nhạt
+                                 } else if (val === 'Lieu') {
+                                     cellColor = 'background:#e1bee7;font-weight:bold;'; // Lieu - hồng nhạt
+                                 } else if (val === 'Late/Soon') {
+                                     cellColor = 'background:#fff9c4;color:#d32f2f;font-weight:bold;'; // Late/Soon - nền vàng, chữ đỏ đậm
                                  } else if (val === '') {
-                                     cellColor = ''; // Cuối tuần - trắng, không tô màu
-                                 } else if (val === 'N') {
-                                     cellColor = 'background:#e8f5e8;font-weight:bold;'; // Normal - xanh nhạt
-                                 } else if (val && val !== 'M' && val !== 'N' && val !== '') {
-                                     // Nếu có thời gian thực tế (HH:MM), tô màu vàng
-                                     if (val.match(/^\d{1,2}:\d{2}$/)) {
-                                         cellColor = 'background:#fff3cd;font-weight:bold;'; // Thời gian bất hợp lệ - vàng
-                                     }
+                                     cellColor = 'background:#fffff;'; // Trống - xám
+                                 } else if (val && val.startsWith('LATE:')) {
+                                     // Late/Soon với thời gian thực tế
+                                     cellColor = 'background:#fff9c4;color:#d32f2f;font-weight:bold;'; // Nền vàng, chữ đỏ đậm
+                                     val = val.replace('LATE:', ''); // Chỉ hiển thị thời gian
+                                 } else if (val && val.startsWith('NORMAL:')) {
+                                     // Normal với thời gian thực tế
+                                     cellColor = 'background:#c8e6c9;font-weight:bold;'; // Nền xanh lá
+                                     val = val.replace('NORMAL:', ''); // Chỉ hiển thị thời gian
+                                 } else if (val === 'Normal') {
+                                     cellColor = 'background:#c8e6c9;font-weight:bold;'; // Normal - nền xanh lá
                                  }
                                  
                                  html += `<td style="text-align:center;${cellColor}" data-col="${columns[d]}">${val || ''}</td>`;

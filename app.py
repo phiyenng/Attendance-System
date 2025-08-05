@@ -16,10 +16,12 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Đường dẫn file tạm cho các bảng dữ liệu
+# Files path
 TEMP_SIGNINOUT_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
 TEMP_APPLY_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
 TEMP_OTLIEU_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+EMPLOYEE_LIST_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
+RULES_XLSX_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -37,8 +39,6 @@ global lieu_followup_df
 # ==========================
 # EMPLOYEE LIST
 # ==========================
-EMPLOYEE_LIST_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
-# Load employee list from file if exists
 if os.path.exists(EMPLOYEE_LIST_PATH):
     try:
         employee_list_df = pd.read_csv(EMPLOYEE_LIST_PATH, dtype={'ID Number': str})
@@ -54,7 +54,6 @@ else:
 # ==========================
 # RULES 
 # ==========================
-RULES_XLSX_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
 if os.path.exists(RULES_XLSX_PATH):
     try:
         rules = pd.read_excel(RULES_XLSX_PATH)
@@ -62,7 +61,6 @@ if os.path.exists(RULES_XLSX_PATH):
         print(f"Error loading rules: {e}")
         rules = pd.DataFrame()
 else:
-    # Create default rules file
     rules = pd.DataFrame(columns=['Holiday Date in This Year', 'Special Work Day'])
     try:
         rules.to_excel(RULES_XLSX_PATH, index=False)
@@ -103,16 +101,13 @@ def map_leave_type(note):
     return note
 
 def translate_apply_headers(df):
-    print('Original columns:', list(df.columns))  # DEBUG
     def normalize(col):
-        # Loại bỏ dấu ', ", khoảng trắng, tab, xuống dòng ở đầu/cuối và bên trong tên cột
         return re.sub(r"[ '\"]+", '', str(col)).strip()
     norm_map = {normalize(k): v for k, v in APPLY_HEADER_MAP.items()}
     new_cols = []
     for col in df.columns:
         ncol = normalize(col)
         new_cols.append(norm_map.get(ncol, col))
-    print('Normalized columns:', new_cols)  # DEBUG
     df.columns = new_cols
     return df
 
@@ -209,7 +204,6 @@ def add_apply_columns(df):
 # =======================
 def process_ot_lieu_df(df, employee_list_df):
 
-    # Add "Name" columns
     if 'Title' in df.columns:
         def extract_name_id(title):
             match = re.search(r'_([a-zA-Z\s]+?)[_\s](\d{7,8})', str(title))
@@ -225,7 +219,6 @@ def process_ot_lieu_df(df, employee_list_df):
             cols.insert(0, cols.pop(cols.index('Name')))
             df = df[cols]
 
-    # Xác định tất cả các cột ngày/giờ/tổng OT/Lieu (chứa cả 'ot' và 'from', v.v.)
     ot_from_cols = [c for c in df.columns if re.search(r'ot.*from', c, re.I)]
     ot_to_cols = [c for c in df.columns if re.search(r'ot.*to', c, re.I)]
     sum_ot_col = next((c for c in df.columns if re.search(r'ot.*sum', c, re.I)), None)
@@ -233,7 +226,6 @@ def process_ot_lieu_df(df, employee_list_df):
     lieu_to_cols = [c for c in df.columns if re.search(r'lieu.*to', c, re.I)]
     sum_lieu_col = next((c for c in df.columns if re.search(r'lieu.*sum', c, re.I)), None)
     
-    # Chuẩn hóa số giờ OT/Lieu
     def clean_hours(val):
         if pd.isna(val): return ''
         s = str(val).strip().lower()
@@ -258,7 +250,7 @@ def process_ot_lieu_df(df, employee_list_df):
     if sum_lieu_col:
         df[sum_lieu_col] = df[sum_lieu_col].apply(clean_hours)
 
-    # Mark warnings for invalid time format for all relevant columns
+    # Mark warnings for invalid time format
     def mark_cell(val, error=False, suggest=None, warning=False):
         if error:
             return {'value': val, 'error': True, 'suggest': suggest}
@@ -269,14 +261,7 @@ def process_ot_lieu_df(df, employee_list_df):
     def parse_time_to_24h(val):
         if pd.isna(val) or not str(val).strip():
             return ''
-        
         s = str(val).strip()
-        # # Nếu là 'Hour : Minutes AM', 'Hour : Minutes PM', hoặc 'Hour : Minutes AM/PM' (bất kể hoa thường, khoảng trắng)
-        # #s_no_space = re.sub(r'\s+', '', s).lower()
-        # if s in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
-        #     return ''
-        
-        # 1. Dạng 12h AM/PM
         m = re.match(r'^(0?[1-9]|1[0-2])\s*[:. ]\s*([0-5][0-9])\s*(AM|PM|am|pm)$', s)
         if m:
             hour = int(m.group(1))
@@ -287,7 +272,6 @@ def process_ot_lieu_df(df, employee_list_df):
             if ampm == 'AM' and hour == 12:
                 hour = 0
             return f'{hour:02d}:{minute:02d}'
-        # 2. Dạng 24h: 21:00, 21.00, 21 00, 21h00
         m = re.match(r'^([01]?[0-9]|2[0-3])\s*[:. h]\s*([0-5][0-9])$', s)
         if m:
             hour = int(m.group(1))
@@ -297,7 +281,6 @@ def process_ot_lieu_df(df, employee_list_df):
 
 # ---- OT From/To & Lieu From/To change format HH:MM ----
     def norm_time_to_24h(val):
-        # Bỏ qua các giá trị đặc biệt
         if str(val).strip() in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
             return val
         parsed = parse_time_to_24h(val)
@@ -316,7 +299,6 @@ def process_ot_lieu_df(df, employee_list_df):
     for col in lieu_to_cols:
         df[col] = df[col].apply(norm_time_to_24h)
 
-    # Helper: check if string is in 12h AM/PM format
     def is_time_ampm(val):
         if pd.isna(val) or not str(val).strip():
             return False
@@ -447,13 +429,9 @@ def process_ot_lieu_df(df, employee_list_df):
 def load_excel_data(file_path, sheet_name=None):
     """Load data from Excel file with support for .xls and .xlsx"""
     try:
-        # Kiểm tra extension của file
         file_ext = os.path.splitext(file_path)[1].lower()
-        
         if file_ext == '.xls':
-            # Xử lý file .xls
             try:
-                # Thử với xlrd engine trước
                 if sheet_name:
                     df = pd.read_excel(file_path, sheet_name=sheet_name, engine='xlrd')
                 else:
@@ -461,7 +439,6 @@ def load_excel_data(file_path, sheet_name=None):
             except Exception as e:
                 print(f"xlrd engine failed for .xls file: {e}")
                 try:
-                    # Fallback: thử với openpyxl engine
                     if sheet_name:
                         df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
                     else:
@@ -470,7 +447,6 @@ def load_excel_data(file_path, sheet_name=None):
                     print(f"openpyxl engine also failed for .xls file: {e2}")
                     raise Exception(f"Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}")
         else:
-            # Xử lý file .xlsx
             workbook = openpyxl.load_workbook(file_path, data_only=True)
             
             if sheet_name:
@@ -484,7 +460,6 @@ def load_excel_data(file_path, sheet_name=None):
         # Clean the data
         df = df.dropna(how='all')
         df = df.fillna('')
-        
         return df
     except Exception as e:
         print(f"Error loading Excel file: {e}")
@@ -525,12 +500,10 @@ def import_signinout():
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
             try:
-                # Thử với xlrd engine trước
                 df = pd.read_excel(file_path, engine='xlrd')
             except Exception as e:
                 print(f"xlrd engine failed: {e}")
                 try:
-                    # Fallback: thử với openpyxl engine
                     df = pd.read_excel(file_path, engine='openpyxl')
                 except Exception as e2:
                     print(f"openpyxl engine also failed: {e2}")
@@ -562,17 +535,14 @@ def import_apply():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
-    
         if file.filename.lower().endswith('.csv'):
             df = try_read_csv(open(file_path, 'rb').read())
         elif file.filename.lower().endswith('.xls'):
             try:
-                # Thử với xlrd engine trước
                 df = pd.read_excel(file_path, engine='xlrd')
             except Exception as e:
                 print(f"xlrd engine failed: {e}")
                 try:
-                    # Fallback: thử với openpyxl engine
                     df = pd.read_excel(file_path, engine='openpyxl')
                 except Exception as e2:
                     print(f"openpyxl engine also failed: {e2}")
@@ -603,8 +573,6 @@ def import_otlieu():
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
-
-        # Load data
         data = load_excel_data(file_path)
         if data is not None:
             if 'OT From Note: 12AM is midnight' in data.columns:
@@ -625,12 +593,8 @@ def import_otlieu():
 def calculate_abnormal():
     """Calculate abnormal attendance"""
     global abnormal_data, sign_in_out_data, apply_data, ot_lieu_data
-    
-    # Get date range from request
     start_date = request.form.get('start_date', '')
     end_date = request.form.get('end_date', '')
-    
-    # Save temporary reviewed/edited data for report
     try:
         if sign_in_out_data is not None and not sign_in_out_data.empty:
             sign_in_out_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx'), index=False)
@@ -650,14 +614,7 @@ def calculate_abnormal():
     
     if sign_in_out_data is None or sign_in_out_data.empty:
         return jsonify({'error': 'No sign in/out data available'}), 400
-    
-    # Clear previous abnormal data
     abnormal_data = pd.DataFrame(columns=['Employee', 'Date', 'SignIn', 'SignOut', 'Status', 'LateMinutes'])
-    
-    # Calculate attendance with date range
-    # This function is no longer needed as check_apply and check_lieu are removed.
-    # The logic for calculating abnormal attendance needs to be re-evaluated based on the new data structures.
-    # For now, we'll just return a placeholder message with date range info.
     date_info = ""
     if start_date and end_date:
         date_info = f" for period {start_date} to {end_date}"
@@ -668,11 +625,8 @@ def calculate_abnormal():
 def get_abnormal_data():
     """Get abnormal data for display"""
     global abnormal_data
-    
     if abnormal_data is None or abnormal_data.empty:
         return jsonify({'data': [], 'message': 'No abnormal data available'})
-    
-    # Convert to list for JSON serialization
     data_list = []
     for _, row in abnormal_data.iterrows():
         data_list.append({
@@ -716,7 +670,6 @@ def export():
     global sign_in_out_data, apply_data, ot_lieu_data, abnormal_data, employee_list_df, rules
     
     try:
-        # Load data from temp files if global variables are empty
         if sign_in_out_data is None or sign_in_out_data.empty:
             temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
             if os.path.exists(temp_signinout_path):
@@ -742,21 +695,17 @@ def export():
             if os.path.exists(rules_path):
                 rules = pd.read_excel(rules_path)
         
-        # Use existing template file
         template_path = os.path.join(app.config['UPLOAD_FOLDER'], 'AttendanceReport.xlsx')
         if not os.path.exists(template_path):
             return jsonify({'error': 'Template file AttendanceReport.xlsx not found'}), 400
         
-        # Create a copy of the template with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"AttendanceReport_{timestamp}.xlsx"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
-        # Copy template file
         import shutil
         shutil.copy2(template_path, file_path)
         
-        # Load the workbook
         from openpyxl import load_workbook
         workbook = load_workbook(file_path)
         
@@ -1011,12 +960,10 @@ def preview_upload():
         if ext in ['.xlsx', '.xls']:
             if ext == '.xls':
                 try:
-                    # Thử với xlrd engine trước
                     excel = pd.ExcelFile(BytesIO(file_bytes), engine='xlrd')
                 except Exception as e:
                     print(f"xlrd engine failed for .xls preview: {e}")
                     try:
-                        # Fallback: thử với openpyxl engine
                         excel = pd.ExcelFile(BytesIO(file_bytes), engine='openpyxl')
                     except Exception as e2:
                         print(f"openpyxl engine also failed for .xls preview: {e2}")
@@ -1061,12 +1008,10 @@ def import_with_sheet():
         if ext in ['.xlsx', '.xls']:
             if ext == '.xls':
                 try:
-                    # Thử với xlrd engine trước
                     df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine='xlrd')
                 except Exception as e:
                     print(f"xlrd engine failed for .xls import: {e}")
                     try:
-                        # Fallback: thử với openpyxl engine
                         df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name, engine='openpyxl')
                     except Exception as e2:
                         print(f"openpyxl engine also failed for .xls import: {e2}")
@@ -1231,7 +1176,6 @@ def remove_employee():
 
 @app.route('/calculate_prep_data', methods=['POST'])
 def calculate_prep_data():
-    # Placeholder: just return success
     return jsonify({'success': True, 'message': 'Prepare data calculation completed.'})
 
 @app.route('/get_signinout_data')
@@ -1258,7 +1202,6 @@ def get_otlieu_data():
     if ot_lieu_data is None or ot_lieu_data.empty:
         return jsonify({'columns': [], 'data': []})
     cols = list(ot_lieu_data.columns)
-    # Không ép kiểu str, chỉ fillna('') để giữ dict lỗi
     rows = ot_lieu_data.fillna('').values.tolist()
     return jsonify({'columns': cols, 'data': rows})
 
@@ -1287,10 +1230,8 @@ def update_otlieu_row():
         col = data.get('column')
         value = data.get('value')
         if ot_lieu_data is not None and 0 <= idx < len(ot_lieu_data) and col in ot_lieu_data.columns:
-            # Luôn cập nhật giá trị mới vào DataFrame, không trả về object warning/error nữa
             ot_lieu_data.at[idx, col] = value
             updated = {}
-            # Nếu là cột OT/Lieu Sum, có thể tính lại giá trị thực tế và trả về nếu cần
             ot_from_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*from', c, re.I)]
             ot_to_cols = [c for c in ot_lieu_data.columns if re.search(r'ot.*to', c, re.I)]
             sum_ot_col = next((c for c in ot_lieu_data.columns if re.search(r'ot.*sum', c, re.I)), None)
@@ -2430,9 +2371,7 @@ def get_total_attendance_detail():
 @app.route('/get_attendance_report')
 def get_attendance_report():
     # Lấy dữ liệu từ các file tạm trước
-    signinout_data = []
-    apply_data = []
-    otlieu_data = []
+    signinout_data,apply_data,otlieu_data = [], [], []
     
     if os.path.exists(TEMP_SIGNINOUT_PATH):
         signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
@@ -2446,67 +2385,39 @@ def get_attendance_report():
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
         otlieu_data = otlieu_df.to_dict('records')
 
-    # Tự động xác định tháng/năm từ dữ liệu signin/out
-    month = 7  # default
-    year = 2024  # default
-    
-    if signinout_data and len(signinout_data) > 0:
-        # Tìm ngày đầu tiên và cuối cùng trong dữ liệu signin/out
-        dates = []
-        for record in signinout_data:
-            if 'attendance_time' in record and pd.notna(record['attendance_time']):
-                try:
-                    date_val = pd.to_datetime(record['attendance_time'])
-                    dates.append(date_val)
-                except:
-                    continue
-        
+    month, year = 7, 2024
+    if signinout_data:
+        dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
         if dates:
-            min_date = min(dates)
-            max_date = max(dates)
-            
-            # Tìm tháng phổ biến nhất trong dữ liệu
             month_counts = {}
             for date in dates:
                 month_key = (date.month, date.year)
                 month_counts[month_key] = month_counts.get(month_key, 0) + 1
-            
-            # Lấy tháng/năm có nhiều dữ liệu nhất
             most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
             month, year = most_common_month
-            
-            print(f"Auto-detected month/year from signin/out data: {month}/{year}")
-            print(f"Date range in data: {min_date.date()} to {max_date.date()}")
-            print(f"Month distribution: {month_counts}")
 
-    # Lấy danh sách nhân viên từ file employee_list.csv
-    emp_path = EMPLOYEE_LIST_PATH
-    if os.path.exists(emp_path):
-        emp_df = pd.read_csv(emp_path, dtype=str)
-    else:
-        emp_df = pd.DataFrame(columns=["Dept", "Name"])
-
-    # Sắp xếp theo Dept nếu có
+    # Load employee list
+    emp_df = pd.read_csv(EMPLOYEE_LIST_PATH, dtype=str) if os.path.exists(EMPLOYEE_LIST_PATH) else pd.DataFrame(columns=["Dept", "Name"])
     if 'Dept' in emp_df.columns:
-        emp_df = emp_df.sort_values(by=['Dept', 'Name'], ascending=[True, True])
-        emp_df = emp_df.reset_index(drop=True)
+        emp_df = emp_df.sort_values(by=['Dept', 'Name']).reset_index(drop=True)
 
-    # Tạo dãy ngày từ 20 tháng trước đến 19 tháng này
-    if month == 1:
-        prev_month = 12
-        prev_year = year - 1
-    else:
-        prev_month = month - 1
-        prev_year = year
-    start_date = pd.Timestamp(prev_year, prev_month, 20)
+    start_date = pd.Timestamp(year, month, 1) - pd.DateOffset(months=1, day=20)
     end_date = pd.Timestamp(year, month, 19)
     days = pd.date_range(start=start_date, end=end_date, freq='D')
     day_cols = [d.strftime('%Y-%m-%d') for d in days]
-
-    # Lấy thông tin ngày đặc biệt từ rules
+    
     holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
+    
+    def normalize_name(name_field):
+        import re
+        if not isinstance(name_field, str):
+            return ""
+        # Xóa ID ở cuối nếu có (ví dụ: 10046198)
+        name_only = re.sub(r'\d{8,}$', '', name_field).strip()
+        # Chuyển thành chữ thường và xóa khoảng trắng thừa
+        return name_only.lower()
 
-    # Hàm xác định loại ngày
+
     def get_day_type(dt, holidays, special_weekends, special_workdays):
         dt_date = dt.date()
         if dt_date in holidays:
@@ -2519,22 +2430,20 @@ def get_attendance_report():
             return 'Weekend'
         return 'Weekday'
 
-    # Hàm xử lý matching tên nhân viên
     def extract_name_from_emp_name(emp_name):
-        # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
         import re
         match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
         if match:
             return match.group(1).strip()
         return emp_name.strip()
 
-    # Hàm kiểm tra có Lieu trong ngày không
     def is_lieu_day(emp_name, check_date, otlieu_data):
-        target_name = extract_name_from_emp_name(emp_name)
+        # emp_name is already normalized
+        target_name = emp_name.lower().strip()
         for record in otlieu_data:
             name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == target_name:
-                # Kiểm tra các cột Lieu From, Lieu To
+            normalized_name_val = normalize_name(name_val)
+            if normalized_name_val == target_name:
                 lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                 for col in lieu_cols:
                     if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -2546,66 +2455,14 @@ def get_attendance_report():
                             continue
         return False
 
-    # Hàm kiểm tra có OT trong ngày không
-    def has_ot_on_date(emp_name, check_date, otlieu_data):
-        target_name = extract_name_from_emp_name(emp_name)
-        for record in otlieu_data:
-            name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == target_name:
-                # Kiểm tra các cột OT Date, Date, OT date
-                ot_date_cols = ['OT Date', 'Date', 'OT date']
-                for col in ot_date_cols:
-                    if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                        try:
-                            ot_date = pd.to_datetime(record[col]).date()
-                            if ot_date == check_date:
-                                return True
-                        except:
-                            continue
-        return False
-
-    # Hàm tính giờ làm thực tế theo logic VBA
-    def calculate_actual_hours(check_in_time, check_out_time):
-        """Tính giờ làm thực tế theo logic VBA"""
-        if not check_in_time or not check_out_time:
-            return 0, 0  # hours, late_minutes
-        
-        # Chuyển đổi sang datetime nếu cần
-        if isinstance(check_in_time, str):
-            try:
-                check_in_time = pd.to_datetime(check_in_time)
-            except:
-                return 0, 0
-        if isinstance(check_out_time, str):
-            try:
-                check_out_time = pd.to_datetime(check_out_time)
-            except:
-                return 0, 0
-        
-        # Tính giờ làm
-        if check_in_time.hour <= 12 and check_out_time.hour >= 13:
-            # Trường hợp có nghỉ trưa
-            morning_hours = min(12 - check_in_time.hour - check_in_time.minute/60, 4)  # Tối đa 4h sáng
-            afternoon_hours = min(check_out_time.hour + check_out_time.minute/60 - 13.5, 4.5)  # Tối đa 4.5h chiều
-            total_hours = morning_hours + afternoon_hours
-        else:
-            # Trường hợp không có nghỉ trưa
-            total_hours = (check_out_time - check_in_time).total_seconds() / 3600
-        
-        # Tính late minutes
-        if total_hours < 8:
-            late_minutes = (8 - total_hours) * 60
-        else:
-            late_minutes = 0
-            
-        return total_hours, late_minutes
-
-    # Hàm kiểm tra Apply data cho ngày
     def get_apply_info_for_date(emp_name, check_date, apply_data):
         """Trả về thông tin apply cho ngày: type, leave_type, is_approved"""
-        target_name = extract_name_from_emp_name(emp_name)
+        # emp_name is already normalized
+        target_name = emp_name.lower().strip()
         for record in apply_data:
-            if (record.get('Name', '').strip() == target_name and 
+            name_val = str(record.get('Name', '') or '')
+            normalized_name_val = normalize_name(name_val)
+            if (normalized_name_val == target_name and 
                 record.get('Results') == 'Approved'):
                 
                 try:
@@ -2622,7 +2479,6 @@ def get_attendance_report():
                         
                     end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
                     
-                    # Kiểm tra check_date có trong khoảng start_date đến end_date không
                     if start_date <= check_date <= end_date:
                         return {
                             'type': record.get('Type', ''),
@@ -2633,168 +2489,185 @@ def get_attendance_report():
                     continue
         return None
 
-    # Tạo DataFrame kết quả với 2 rows cho mỗi nhân viên
-    result_rows = []
-    row_no = 1
-    
-    for _, emp in emp_df.iterrows():
-        emp_name = emp['Name']
-        emp_dept = emp.get('Dept', '')
-        
-        # Tạo 2 rows cho mỗi nhân viên: Morning shift & Afternoon shift
-        for shift in ['Morning shift', 'Afternoon shift']:
-            row = {
-                'Department': emp_dept,
-                'Name': emp_name,
-                'Shift': shift
-            }
-            
-            # Thêm các cột ngày
-            for day in days:
-                day_str = day.strftime('%Y-%m-%d')
-                day_type = get_day_type(day, holidays, special_weekends, special_workdays)
-                day_date = day.date()
-                
-                # Kiểm tra có phải ngày Lieu không
-                is_lieu = is_lieu_day(emp_name, day_date, otlieu_data)
-                
-                # Chỉ xử lý cho ngày làm việc bình thường (không cuối tuần, ngày lễ, Lieu)
-                if day_type == 'Weekday' and not is_lieu:
-                    
-                    # Lấy thông tin signinout cho ngày này
-                    day_signinout = []
-                    if signinout_data:
-                        df_sign = pd.DataFrame(signinout_data)
-                        if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
-                            df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-                            df_sign['date'] = df_sign['attendance_time'].dt.date
-                            target_name = extract_name_from_emp_name(emp_name)
-                            mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
-                            day_signinout = df_sign[mask]['attendance_time'].tolist()
-                    
-                    # Lấy thông tin apply cho ngày này
-                    apply_info = get_apply_info_for_date(emp_name, day_date, apply_data)
-                    
-                    # Logic điền dữ liệu theo thứ tự ưu tiên nghiêm ngặt
-                    cell_value = None
-                    
-                    # 1. Kiểm tra Apply (ưu tiên cao nhất)
-                    if apply_info and apply_info['is_approved']:
-                        apply_type = apply_info['type']
-                        leave_type = apply_info['leave_type'].lower()
-                        
-                        # 1.1 Trip (ưu tiên cao nhất)
-                        if apply_type == 'Trip':
-                            cell_value = 'T'
-                        # 1.2 Leave (chỉ áp dụng cho ngày làm việc bình thường)
-                        elif apply_type == 'Leave':
-                            cell_value = 'L'
-                        # 1.3 Supplement
-                        elif apply_type == 'Supplement':
-                            cell_value = 'S'
-                    
-                    # 2. Nếu không có Apply, lấy dữ liệu chấm công thực tế
-                    if cell_value is None and day_signinout:
-                        if shift == 'Morning shift':
-                            # Ca sáng: lấy thời gian sớm nhất
-                            earliest_time = min(day_signinout)
-                            if earliest_time.hour < 16:  # Hợp lý cho ca sáng
-                                cell_value = 'N'  # Normal - chỉ tô xanh, không hiện thời gian
-                            else:
-                                cell_value = earliest_time.strftime('%H:%M')  # Hiện thời gian + tô vàng
-                        else:  # Afternoon shift
-                            # Ca chiều: lấy thời gian muộn nhất
-                            latest_time = max(day_signinout)
-                            if latest_time.hour >= 10:  # Hợp lý cho ca chiều
-                                cell_value = 'N'  # Normal - chỉ tô xanh, không hiện thời gian
-                            else:
-                                cell_value = latest_time.strftime('%H:%M')  # Hiện thời gian + tô vàng
-                    
-                    # 3. Nếu không có dữ liệu gì
-                    if cell_value is None:
-                        # Kiểm tra xem có phải cuối tuần không
-                        day_of_week = day.weekday()  # 5=Saturday, 6=Sunday
-                        if day_of_week >= 5:  # Cuối tuần
-                            cell_value = ''  # Để trống
-                        else:
-                            cell_value = 'M'  # Miss cho ngày trong tuần
-                    
-                    row[day_str] = cell_value
-                else:
-                    # Ngày cuối tuần, ngày lễ, hoặc Lieu
-                    if is_lieu:
-                        row[day_str] = 'LE'  # Lieu
-                    else:
-                        row[day_str] = ''  # Ngày nghỉ
-            
-            # Tính tổng hợp và phát hiện sai phạm
-            summary = {'Normal': 0, 'Leave': 0, 'Trip': 0, 'Miss': 0, 'Late/Soon': 0, 'Lieu': 0, 'OT': 0, 'Supplement': 0}
-            total_late_minutes = 0
-            
-            for day in days:
-                day_str = day.strftime('%Y-%m-%d')
-                val = row.get(day_str, '')
-                
-                # Đếm các loại
-                if val == 'L': summary['Leave'] += 1
-                elif val == 'T': summary['Trip'] += 1
-                elif val == 'S': summary['Supplement'] += 1
-                elif val == 'LE': summary['Lieu'] += 1
-                elif val == 'OT': summary['OT'] += 1
-                elif val == 'M': summary['Miss'] += 1
-                elif val == 'N':  # Normal - dữ liệu hợp lệ
-                    summary['Normal'] += 1
-                elif val and val != '' and ':' in val:  # Có thời gian chấm công bất hợp lệ
-                    summary['Miss'] += 1  # Đếm vào Miss
-                    
-                    # Kiểm tra sai phạm (trễ/về sớm)
-                    try:
-                        # Quy đổi thời gian làm việc
-                        if shift == 'Morning shift':
-                            # Ca sáng: giả sử giờ ra là 17:30
-                            check_in = pd.to_datetime(val)
-                            check_out = pd.to_datetime('17:30')
-                        else:
-                            # Ca chiều: giả sử giờ vào là 08:00
-                            check_in = pd.to_datetime('08:00')
-                            check_out = pd.to_datetime(val)
-                        
-                        # Tính giờ làm việc thực tế (trừ 1.5h nghỉ trưa)
-                        work_hours = (check_out - check_in).total_seconds() / 3600 - 1.5
-                        
-                        # So sánh với 8 tiếng tiêu chuẩn
-                        if work_hours < 8:
-                            late_minutes = int((8 - work_hours) * 60)
-                            total_late_minutes += late_minutes
-                    except:
-                        pass
-            
-            summary['Late/Soon'] = total_late_minutes
-            row.update(summary)
-            result_rows.append(row)
-            row_no += 1
+    # --- PHẦN 2: CHUẨN HÓA VÀ XÂY DỰNG BẢNG DỮ LIỆU GỐC ---
 
-    # Tạo DataFrame kết quả
+    # Bước 1: Chuẩn hóa file danh sách nhân viên
+    if os.path.exists(EMPLOYEE_LIST_PATH):
+        emp_df = pd.read_csv(EMPLOYEE_LIST_PATH, dtype=str)
+        emp_df.dropna(subset=['Name'], inplace=True)
+        emp_df['NormalizedName'] = emp_df['Name'].apply(normalize_name)
+        # Giữ lại tên gốc để hiển thị
+        emp_df['DisplayName'] = emp_df['Name'].apply(lambda x: re.sub(r'\d{8,}$', '', x).strip())
+    else:
+        return jsonify({'error': 'Không tìm thấy file danh sách nhân viên.'})
+
+    # Bước 2: Chuẩn hóa file chấm công
+    if not signinout_data:
+        return jsonify({'error': 'Không có dữ liệu chấm công.'})
+    
+    df_sign = pd.DataFrame(signinout_data)
+    df_sign.dropna(subset=['attendance_time', 'emp_name'], inplace=True)
+    df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+    df_sign['Date'] = df_sign['attendance_time'].dt.date
+    df_sign['NormalizedName'] = df_sign['emp_name'].apply(normalize_name)
+
+    # Bước 3: Tổng hợp giờ vào/ra bằng tên đã chuẩn hóa
+    daily_times = df_sign.groupby(['NormalizedName', 'Date'])['attendance_time'].agg(
+        SignIn=('min'),
+        SignOut=('max')
+    ).reset_index()
+
+    # Bước 4: Tạo bảng master và hợp nhất bằng khóa chuẩn hóa
+    days = pd.date_range(start=(pd.Timestamp(year, month, 1) - pd.DateOffset(months=1)).replace(day=20), 
+                         end=pd.Timestamp(year, month, 19), freq='D')
+    
+    master_df = pd.DataFrame([
+        (row['DisplayName'], row['NormalizedName'], day.date())
+        for _, row in emp_df.iterrows()
+        for day in days
+    ], columns=['DisplayName', 'NormalizedName', 'Date'])
+
+    master_df = pd.merge(master_df, emp_df[['NormalizedName', 'Dept']], on='NormalizedName', how='left')
+    master_df = pd.merge(master_df, daily_times, on=['NormalizedName', 'Date'], how='left')
+
+    # (Chuẩn hóa các file khác nếu cần dùng, ví dụ Apply Data)
+    if apply_data:
+        apply_df = pd.DataFrame(apply_data)
+        apply_df['NormalizedName'] = apply_df['Emp Name'].apply(normalize_name)
+
+    processed_records = []
+    abnormal_report_data = []
+
+    for _, row in master_df.iterrows():
+        record = row.to_dict()
+        emp_name, day_date = record['DisplayName'], record['Date']
+        day_pd_ts = pd.Timestamp(day_date)
+
+        record['DayType'] = get_day_type(day_pd_ts, holidays, special_weekends, special_workdays)
+        record['IsLieu'] = is_lieu_day(record['NormalizedName'], day_date, otlieu_data)
+        record['ApplyInfo'] = get_apply_info_for_date(record['NormalizedName'], day_date, apply_data)
+        
+        status, late_minutes = '', 0
+
+        if record['DayType'] != 'Weekday' or record['IsLieu']:
+            status = 'Lieu' if record['IsLieu'] else 'Off'
+        elif record['ApplyInfo'] and record['ApplyInfo']['is_approved']:
+            apply_type = record['ApplyInfo']['type']
+            if apply_type == 'Supplement':
+                # Nếu có đơn Supplement, kiểm tra chấm công
+                if pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
+                    status = 'Supplement'  # Không có chấm công, làm bổ sung
+                elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
+                    status = 'Supplement'  # Thiếu chấm công, làm bổ sung
+                else:
+                    # Có đầy đủ chấm công, xử lý theo logic bình thường
+                    status = 'Normal'  # Sẽ được xử lý tiếp ở phần else
+            else:
+                # Các loại đơn khác (Trip, Leave)
+                status = apply_type
+        elif pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
+            status = 'Miss' # Không có chấm công nào
+        elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
+            status = 'Miss' # Thiếu SignIn hoặc SignOut
+        else:
+            status = 'Normal'
+            check_in_time, check_out_time = record['SignIn'], record['SignOut']
+            
+            if pd.notna(check_in_time) and pd.notna(check_out_time):
+                work_seconds = (check_out_time - check_in_time).total_seconds()
+                
+                lunch_start = check_in_time.replace(hour=12, minute=0, second=0)
+                lunch_end = check_in_time.replace(hour=13, minute=30, second=0)
+                if check_in_time < lunch_end and check_out_time > lunch_start:
+                    work_seconds -= 1.5 * 3600
+
+                work_hours = work_seconds / 3600
+                
+                if work_hours < 8.0:
+                    late_minutes = int((8.0 - work_hours) * 60)
+                    status = 'Late/Soon' 
+                    
+                    abnormal_report_data.append({
+                        'Department': record.get('Dept', ''), 'Name': emp_name, 'Date': day_date,
+                        'SignIn': check_in_time.strftime('%H:%M'), 'SignOut': check_out_time.strftime('%H:%M'),
+                        'Reason': 'Late/Soon', 'Minutes': late_minutes
+                    })
+
+        record['Status'] = status
+        record['LateMinutes'] = late_minutes
+        # Ensure we have the normalized name for later processing
+        record['NormalizedName'] = record.get('NormalizedName', '')
+        processed_records.append(record)
+
+        processed_df = pd.DataFrame(processed_records)
+
+    result_rows = []
+    summary_keys = ['Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'Supplement', 'TotalLateMinutes']
+
+    for _, emp in emp_df.iterrows():
+        emp_name_display = emp['DisplayName']
+        emp_name_normalized = emp['NormalizedName']
+        emp_data = processed_df[processed_df['NormalizedName'] == emp_name_normalized]
+        
+        morning_row = {'Department': emp.get('Dept', ''), 'Name': emp_name_display, 'Shift': 'Morning shift'}
+        afternoon_row = {'Department': emp.get('Dept', ''), 'Name': emp_name_display, 'Shift': 'Afternoon shift'}
+        
+        summary = {key: 0 for key in summary_keys}
+
+        for day in days:
+            day_str = day.strftime('%Y-%m-%d')
+            day_record_df = emp_data[emp_data['Date'] == day.date()]
+
+            if not day_record_df.empty:
+                record = day_record_df.iloc[0]
+                status = record['Status']
+                
+                if status in ['Trip', 'Leave', 'Supplement', 'Miss']:
+                    morning_row[day_str], afternoon_row[day_str] = status, status
+                    summary[status] += 0.5
+                elif status == 'Lieu':
+                    morning_row[day_str], afternoon_row[day_str] = 'Lieu', 'Lieu'
+                    summary['Lieu'] += 0.5
+                elif status == 'Off':
+                    morning_row[day_str], afternoon_row[day_str] = '', ''
+                elif status in ['Normal', 'Late/Soon']:
+                    # Trả về thời gian với prefix để frontend phân biệt
+                    morning_time = pd.to_datetime(record['SignIn']).strftime('%H:%M') if pd.notna(record['SignIn']) else '0'
+                    afternoon_time = pd.to_datetime(record['SignOut']).strftime('%H:%M') if pd.notna(record['SignOut']) else '0'
+                    
+                    if status == 'Late/Soon':
+                        morning_row[day_str] = f"LATE:{morning_time}"
+                        afternoon_row[day_str] = f"LATE:{afternoon_time}"
+                    else:
+                        morning_row[day_str] = f"NORMAL:{morning_time}"
+                        afternoon_row[day_str] = f"NORMAL:{afternoon_time}"
+                    
+                    summary[status] += 0.5
+                
+                summary['TotalLateMinutes'] += record['LateMinutes']
+
+        morning_row.update(summary)
+        
+        result_rows.append(morning_row)
+        result_rows.append(afternoon_row)
+
     result = pd.DataFrame(result_rows)
-    
-    # Xác định thứ tự cột
-    columns = ['Department', 'Name', 'Shift'] + day_cols + [
-        'Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'OT', 'Supplement'
-    ]
-    
-    # Đảm bảo tất cả cột tồn tại
+    columns = ['Department', 'Name', 'Shift'] + day_cols + list(summary.keys())
     for col in columns:
         if col not in result.columns:
             result[col] = ''
-    
-    # Sắp xếp theo thứ tự cột
     result = result[columns]
     
-    # Chuyển dữ liệu về dạng list để trả ra frontend
     cols = list(result.columns)
     rows = result.fillna('').astype(str).values.tolist()
 
-    return jsonify({'columns': cols, 'rows': rows})
+    abnormal_cols = list(abnormal_report_data[0].keys()) if abnormal_report_data else []
+    abnormal_rows = [list(d.values()) for d in abnormal_report_data]
+
+    return jsonify({
+        'columns': cols, 'rows': rows,
+        'abnormal_columns': abnormal_cols, 'abnormal_rows': abnormal_rows
+    })
 
 def flatten_cell(cell):
     if isinstance(cell, dict) and 'value' in cell:
@@ -2929,9 +2802,6 @@ def remove_file_from_data():
     
     try:
         file_index = int(file_index)
-        
-        # For now, we'll clear all data since we don't track individual files
-        # In a more sophisticated implementation, you could track which rows came from which files
         if data_type == 'signinout':
             sign_in_out_data = None
         elif data_type == 'apply':
@@ -2964,7 +2834,6 @@ def get_current_data_info():
     else:
         return jsonify({'error': 'Invalid data type'}), 400
     
-    # Get column information
     columns = list(data.columns) if data is not None else []
     
     return jsonify({
@@ -2981,10 +2850,8 @@ def save_apply_changes():
     try:
         data = request.json.get('data', [])
         if data:
-            # Convert back to DataFrame
             df = pd.DataFrame(data)
             apply_data = df
-            # Save to temporary file
             apply_data.to_excel(TEMP_APPLY_PATH, index=False)
             return jsonify({'success': True, 'message': 'Apply data saved successfully'})
         else:
@@ -2999,10 +2866,8 @@ def save_otlieu_changes():
     try:
         data = request.json.get('data', [])
         if data:
-            # Convert back to DataFrame
             df = pd.DataFrame(data)
             ot_lieu_data = df
-            # Save to temporary file
             ot_lieu_save = ot_lieu_data.applymap(flatten_cell)
             ot_lieu_save.to_excel(TEMP_OTLIEU_PATH, index=False)
             return jsonify({'success': True, 'message': 'OT Lieu data saved successfully'})
@@ -3018,10 +2883,8 @@ def save_signinout_changes():
     try:
         data = request.json.get('data', [])
         if data:
-            # Convert back to DataFrame
             df = pd.DataFrame(data)
             sign_in_out_data = df
-            # Save to temporary file
             sign_in_out_data.to_excel(TEMP_SIGNINOUT_PATH, index=False)
             return jsonify({'success': True, 'message': 'Sign In/Out data saved successfully'})
         else:
@@ -3033,7 +2896,6 @@ def calculate_otlieu_report_for_export():
     """Calculate OT Lieu Report data for export (without request context)"""
     global ot_lieu_data, employee_list_df, rules
     
-    # Load data from temp files if global variables are empty
     if ot_lieu_data is None or ot_lieu_data.empty:
         temp_otlieu_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
         if os.path.exists(temp_otlieu_path):
@@ -4178,24 +4040,27 @@ def apply_total_attendance_styling(worksheet):
             cell.border = thin_border
 
 def apply_attendance_report_styling(worksheet):
-    """Apply styling to Attendance Report sheet"""
+    """
+    Áp dụng màu sắc và định dạng cho sheet 'Attendance Report'.
+    Hàm này sẽ tự suy luận trạng thái từ giá trị của ô.
+    """
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
-    # Header styling
+    # --- STYLE ---
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="255E91", end_color="255E91", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Body alignment for Name column
     name_body_alignment = Alignment(horizontal="left", vertical="center")
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
     
-    # Apply header styling
+    # --- STYLE HEADER ---
     for cell in worksheet[1]:
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = header_alignment
+        cell.alignment = Alignment(horizontal="center", vertical="center")
     
-    # Auto-adjust column widths
     for col_idx, column in enumerate(worksheet.columns, 1):
         max_length = 0
         column_letter = column[0].column_letter
@@ -4205,66 +4070,57 @@ def apply_attendance_report_styling(worksheet):
                     max_length = len(str(cell.value))
             except:
                 pass
-        
-        # Special handling for Name column (2nd column)
-        if col_idx == 2:  # Name column
-            adjusted_width = min(max_length + 1, 30)  # Slightly tighter width
-        else:
             adjusted_width = min(max_length + 2, 50)
         worksheet.column_dimensions[column_letter].width = adjusted_width
     
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # Apply styling to all cells including status colors
-    for row_idx, row in enumerate(worksheet.iter_rows(), 1):
-        for col_idx, cell in enumerate(row, 1):
+    # --- LOGIC ---
+
+    # 'TotalLateMinutes'
+    late_minutes_col_idx = None
+    summary_start_col_idx = None
+    for col_idx, cell in enumerate(worksheet[1], 1):
+        if cell.value == 'TotalLateMinutes':
+            late_minutes_col_idx = col_idx
+        if cell.value == 'Normal': 
+             summary_start_col_idx = col_idx
+
+    for row_idx, row in enumerate(worksheet.iter_rows(min_row=2), 2):
+        has_late_soon_violation = False
+        if late_minutes_col_idx:
+            try:
+                minutes = float(worksheet.cell(row=row_idx, column=late_minutes_col_idx).value)
+                if minutes > 0:
+                    has_late_soon_violation = True
+            except (ValueError, TypeError):
+                pass
+
+        for cell in row:
             cell.border = thin_border
             
-            # Apply specific styling for Name column (assuming it's the 2nd column)
-            if col_idx == 2 and row_idx > 1:  # Name column, body rows
-                cell.alignment = name_body_alignment
-            
-            # Apply status styling based on cell content
-            if row_idx > 1:  # Skip header row
-                cell_value = str(cell.value) if cell.value else ""
-                
-                # Status colors
-                if cell_value == 'N':  # Normal
-                    cell.fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
-                    cell.font = Font(color="2E7D32", bold=True)
-                elif cell_value == 'L':  # Leave
-                    cell.fill = PatternFill(start_color="FFE0B2", end_color="FFE0B2", fill_type="solid")
-                    cell.font = Font(color="E65100", bold=True)
-                elif cell_value == 'T':  # Trip
-                    cell.fill = PatternFill(start_color="BBDEFB", end_color="BBDEFB", fill_type="solid")
-                    cell.font = Font(color="1565C0", bold=True)
-                elif cell_value == 'M':  # Miss
-                    cell.fill = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
+            if summary_start_col_idx and cell.column >= summary_start_col_idx:
+                continue
+
+            cell_value = str(cell.value) if cell.value is not None else ""
+
+            if cell_value == 'Trip':
+                cell.fill = PatternFill(start_color="BBDEFB", fill_type="solid")
+            elif cell_value == 'Leave':
+                cell.fill = PatternFill(start_color="FFE0B2", fill_type="solid")
+            elif cell_value == 'Supplement':
+                cell.fill = PatternFill(start_color="C5CAE9", fill_type="solid")
+            elif cell_value == 'Lieu':
+                cell.fill = PatternFill(start_color="E1BEE7", fill_type="solid")
+            elif cell_value == '0' or cell_value.lower() == 'miss':
+                cell.fill = PatternFill(start_color="FFCDD2", fill_type="solid")  # Nền đỏ
+                cell.font = Font(color="D32F2F", bold=True)
+            elif ':' in cell_value:
+                if has_late_soon_violation:
+                    cell.fill = PatternFill(start_color="FFF9C4", fill_type="solid")  # Nền vàng
                     cell.font = Font(color="D32F2F", bold=True)
-                elif cell_value == 'LS':  # Late/Soon
-                    cell.fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
-                    cell.font = Font(color="F57F17", bold=True)
-                elif cell_value == 'LE':  # Lieu
-                    cell.fill = PatternFill(start_color="E1BEE7", end_color="E1BEE7", fill_type="solid")
-                    cell.font = Font(color="7B1FA2", bold=True)
-                elif cell_value == 'OT':  # OT
-                    cell.fill = PatternFill(start_color="FFCCBC", end_color="FFCCBC", fill_type="solid")
-                    cell.font = Font(color="D84315", bold=True)
-                elif cell_value == 'S':  # Supplement
-                    cell.fill = PatternFill(start_color="C5CAE9", end_color="C5CAE9", fill_type="solid")
-                    cell.font = Font(color="3949AB", bold=True)
-                elif cell_value == 'H':  # Holiday
-                    cell.fill = PatternFill(start_color="F8BBD9", end_color="F8BBD9", fill_type="solid")
-                    cell.font = Font(color="C2185B", bold=True)
-                elif cell_value == 'W':  # Weekend
-                    cell.fill = PatternFill(start_color="D7CCC8", end_color="D7CCC8", fill_type="solid")
-                    cell.font = Font(color="5D4037", bold=True)
+                else:
+                    cell.fill = PatternFill(start_color="C8E6C9", fill_type="solid")  # Nền xanh lá
+            elif cell_value == '': 
+                 cell.fill = PatternFill(start_color="E0E0E0", fill_type="solid")
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 
