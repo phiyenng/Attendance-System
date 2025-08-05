@@ -1944,7 +1944,7 @@ def get_total_attendance_detail():
     # Lấy dữ liệu từ các file tạm
     signinout_data = []
     apply_data = []
-    otlieu_data = []
+    ot_lieu_data = []
     
     if os.path.exists(TEMP_SIGNINOUT_PATH):
         signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
@@ -1956,7 +1956,7 @@ def get_total_attendance_detail():
     
     if os.path.exists(TEMP_OTLIEU_PATH):
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
-        otlieu_data = otlieu_df.to_dict('records')
+        ot_lieu_data = otlieu_df.to_dict('records')
 
     # Lấy thông tin ngày đặc biệt từ rules
     holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
@@ -1998,9 +1998,9 @@ def get_total_attendance_detail():
         return emp_name.strip()
 
     # Hàm kiểm tra nhân viên có nghỉ Lieu ngày đó không
-    def is_lieu_day(emp_name, check_date, otlieu_data):
+    def is_lieu_day(emp_name, check_date, ot_lieu_data):
         target_name = extract_name_from_emp_name(emp_name)
-        for record in otlieu_data:
+        for record in ot_lieu_data:
             name_val = str(record.get('Name', '') or '')
             if name_val.strip() == target_name:
                 # Kiểm tra các cột Lieu From, Lieu To
@@ -2016,9 +2016,9 @@ def get_total_attendance_detail():
         return False
 
     # Hàm kiểm tra có OT trong ngày không
-    def has_ot_on_date(emp_name, check_date, otlieu_data):
+    def has_ot_on_date(emp_name, check_date, ot_lieu_data):
         target_name = extract_name_from_emp_name(emp_name)
-        for record in otlieu_data:
+        for record in ot_lieu_data:
             name_val = str(record.get('Name', '') or '')
             if name_val.strip() == target_name:
                 # Kiểm tra các cột OT Date, Date, OT date
@@ -2136,8 +2136,8 @@ def get_total_attendance_detail():
             
             if is_normal_workday:
                 # Kiểm tra các điều kiện
-                has_ot = has_ot_on_date(emp_name, dt_date, otlieu_data)
-                has_lieu = is_lieu_day(emp_name, dt_date, otlieu_data)
+                has_ot = has_ot_on_date(emp_name, dt_date, ot_lieu_data)
+                has_lieu = is_lieu_day(emp_name, dt_date, ot_lieu_data)
                 has_apply_leave = has_apply_leave_on_date(emp_name, dt_date, apply_data)
                 
                 # Xác định ca làm việc
@@ -2335,7 +2335,7 @@ def get_total_attendance_detail():
 @app.route('/get_attendance_report')
 def get_attendance_report():
     # Lấy dữ liệu từ các file tạm trước
-    signinout_data,apply_data,otlieu_data = [], [], []
+    signinout_data,apply_data,ot_lieu_data = [], [], []
     
     if os.path.exists(TEMP_SIGNINOUT_PATH):
         signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
@@ -2347,7 +2347,7 @@ def get_attendance_report():
     
     if os.path.exists(TEMP_OTLIEU_PATH):
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
-        otlieu_data = otlieu_df.to_dict('records')
+        ot_lieu_data = otlieu_df.to_dict('records')
 
     month, year = 7, 2024
     if signinout_data:
@@ -2401,10 +2401,10 @@ def get_attendance_report():
             return match.group(1).strip()
         return emp_name.strip()
 
-    def is_lieu_day(emp_name, check_date, otlieu_data):
+    def is_lieu_day(emp_name, check_date, ot_lieu_data):
         # emp_name is already normalized
         target_name = emp_name.lower().strip()
-        for record in otlieu_data:
+        for record in ot_lieu_data:
             name_val = str(record.get('Name', '') or '')
             normalized_name_val = normalize_name(name_val)
             if normalized_name_val == target_name:
@@ -2508,7 +2508,7 @@ def get_attendance_report():
         day_pd_ts = pd.Timestamp(day_date)
 
         record['DayType'] = get_day_type(day_pd_ts, holidays, special_weekends, special_workdays)
-        record['IsLieu'] = is_lieu_day(record['NormalizedName'], day_date, otlieu_data)
+        record['IsLieu'] = is_lieu_day(record['NormalizedName'], day_date, ot_lieu_data)
         record['ApplyInfo'] = get_apply_info_for_date(record['NormalizedName'], day_date, apply_data)
         
         status, late_minutes = '', 0
@@ -3051,11 +3051,11 @@ def calculate_total_attendance_detail_for_export():
                 return match.group(1).strip()
             return emp_name.strip()
         
-        def is_lieu_day(emp_name, check_date, otlieu_data):
-            if otlieu_data is None or otlieu_data.empty:
+        def is_lieu_day(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
             target_name = extract_name_from_emp_name(emp_name)
-            for _, record in otlieu_data.iterrows():
+            for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
                 if name_val.strip() == target_name:
                     lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
@@ -3069,11 +3069,11 @@ def calculate_total_attendance_detail_for_export():
                                 continue
             return False
         
-        def has_ot_on_date(emp_name, check_date, otlieu_data):
-            if otlieu_data is None or otlieu_data.empty:
+        def has_ot_on_date(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
             target_name = extract_name_from_emp_name(emp_name)
-            for _, record in otlieu_data.iterrows():
+            for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
                 if name_val.strip() == target_name:
                     ot_date_cols = ['OT Date', 'Date', 'OT date']
@@ -3514,7 +3514,7 @@ def calculate_attendance_report_for_export():
                     day_date = day.date()
                     
                     # Process weekday (Monday to Friday, no Lieu)
-                    if day_type == 'Weekday' and not is_lieu_day(emp_name, day_date, otlieu_data):
+                    if day_type == 'Weekday' and not is_lieu_day(emp_name, day_date, ot_lieu_data):
                         
                         # Get signinout data for this day
                         day_signinout = []
