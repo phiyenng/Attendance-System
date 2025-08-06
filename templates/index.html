@@ -972,6 +972,7 @@
                     <!-- Edit Controls -->
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div>
+                            <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
                             <button class="btn btn-outline-primary btn-sm me-2" id="editDataBtn" onclick="toggleEditMode()">
                                 <i class="fas fa-edit"></i> Edit Mode
                             </button>
@@ -1020,9 +1021,9 @@
                 <!-- Report Content (hidden initially) -->
                 <div id="reportContent" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div>
+                        <!-- <div>
                             <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
-                        </div>
+                        </div> -->
                         <div>
                             <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
                             <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
@@ -1049,19 +1050,7 @@
                         <div class="tab-pane fade show active" id="otlieuBeforeTab"> <!-- OT Lieu Before content here --> </div>
                         <div class="tab-pane fade" id="otlieuReportTab"> <!-- OT Lieu Report content here --> </div>
                         <div class="tab-pane fade" id="totalAttendanceDetailTab"> <!-- Total Attendance Detail content here --> </div>
-                        <div class="tab-pane fade" id="attendanceReportTab">
-                            <div id="attendanceReportHeader" class="d-flex flex-column align-items-center mb-3">
-                                <h2 style="font-weight:bold; text-align:center; margin-bottom:10px;">Monthly Attendance Report</h2>
-                                <div id="attendanceReportPeriod" class="text-muted mb-2" style="font-size:0.9rem;">Loading period...</div>
-                                <div class="d-flex gap-2 align-items-center">
-                                    <label for="attendanceMonth" class="form-label mb-0">Month:</label>
-                                    <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
-                                    <label for="attendanceYear" class="form-label mb-0">Year:</label>
-                                    <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
-                                </div>
-                            </div>
-                            <div id="attendanceReportTableContainer"></div>
-                        </div>
+                        <div class="tab-pane fade" id="attendanceReportTab"></div>
                     </div>
                 </div>
             </div>
