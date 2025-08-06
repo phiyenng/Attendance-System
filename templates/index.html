@@ -968,6 +968,9 @@
                         <li class="nav-item">
                             <a class="nav-link" id="nav-otlieu" data-bs-toggle="tab" href="#otlieuTab">OT Lieu</a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="nav-lieu-followup" data-bs-toggle="tab" href="#lieuFollowupTab">Lieu Followup</a>
+                        </li>
                     </ul>
                     <!-- Edit Controls -->
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -999,6 +1002,14 @@
                         <div class="tab-pane fade" id="otlieuTab">
                             <div id="otlieuTableContainer"></div>
                         </div>
+                        <div class="tab-pane fade" id="lieuFollowupTab">
+                            <div class="d-flex mb-2 gap-2">
+                                <input type="file" id="lieuFollowupImportFile" accept=".xlsx,.xls" class="form-control form-control-sm" style="max-width:220px;">
+                                <button class="btn btn-sm btn-primary" id="lieuFollowupImportBtn">Import</button>
+                                <button class="btn btn-sm btn-success" id="lieuFollowupAddBtn">Add</button>
+                            </div>
+                            <div id="lieuFollowupTableContainer"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1021,14 +1032,11 @@
                 <div id="reportContent" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div>
-                            <button class="btn btn-outline-primary btn-sm me-2" id="lieuFollowupBtn">Lieu Followup</button>
                         </div>
                         <div>
                             <button class="btn btn-outline-secondary btn-sm me-2" id="reviewDataBtn"><i class="fas fa-table"></i> Review Data</button>
                             <button class="btn btn-outline-danger btn-sm" id="backToEditBtn"><i class="fas fa-arrow-left"></i> Back to Edit</button>
-                            <button class="btn btn-action btn-success btn-sm ms-2" id="exportAttendanceReportBtn" style="background:#43a047;color:#fff;border:none;">
-                                <i class="fas fa-file-export"></i> Export
-                            </button>
+
                         </div>
                     </div>
                     <ul class="nav nav-tabs mb-3" id="reportNavTabs">
@@ -1928,7 +1936,7 @@
         // --- Data Tab Event Listeners ---
         document.addEventListener('DOMContentLoaded', function() {
             // Add event listeners for data tabs
-            const dataTabs = ['nav-signinout', 'nav-apply', 'nav-otlieu'];
+            const dataTabs = ['nav-signinout', 'nav-apply', 'nav-otlieu', 'nav-lieu-followup'];
             dataTabs.forEach(tabId => {
                 const tab = document.getElementById(tabId);
                 if (tab) {
@@ -1951,6 +1959,8 @@
                 renderTable('applyTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
             } else if (document.getElementById('nav-otlieu').classList.contains('active')) {
                 renderTable('otlieuTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+            } else if (document.getElementById('nav-lieu-followup').classList.contains('active')) {
+                loadLieuFollowupTable();
             }
         }
 
@@ -3663,21 +3673,13 @@
         }
 
         function loadAttendanceReportTable() {
-            // Lần đầu load: không gửi parameter để backend tự động xác định
             const month = document.getElementById('attendanceMonth').value;
             const year = document.getElementById('attendanceYear').value;
             
-            console.log('Loading attendance report...');
+            console.log('Loading attendance report for month:', month, 'year:', year);
             
-            // Kiểm tra xem có dữ liệu cache cho tháng/năm hiện tại không
-            if (window.reportData && window.reportData.attendanceReport && 
-                window.reportData.attendanceReport.month == month && 
-                window.reportData.attendanceReport.year == year) {
-                renderPreviewTable('attendanceReportTab', window.reportData.attendanceReport.columns, window.reportData.attendanceReport.rows);
-                updateAttendanceReportPeriod(window.reportData.attendanceReport);
-            } else {
-                // Fetch dữ liệu mới - không gửi parameter để backend tự động xác định
-                fetch(`/get_attendance_report`)
+            // Fetch dữ liệu với tháng/năm được chọn
+            fetch(`/get_attendance_report?month=${month}&year=${year}`)
                     .then(res => res.json())
                     .then(data => {
                         console.log('Received data:', data);
@@ -3702,14 +3704,10 @@
                             console.error('Error rendering table:', error);
                         }
                         updateAttendanceReportPeriod(data);
-                        
-                        // Cập nhật dropdown theo tháng được xác định từ backend
-                        updateDropdownFromData(data);
                     })
                     .catch(error => {
                         console.error('Error loading attendance report:', error);
                     });
-            }
         }
         
         function updateDropdownFromData(data) {
@@ -3858,45 +3856,90 @@
             }
         };
 
-        // Export button handler
-        document.addEventListener('DOMContentLoaded', function() {
-            const exportBtn = document.getElementById('exportAttendanceReportBtn');
-            if (exportBtn) {
-                exportBtn.addEventListener('click', function() {
-                    showLoading(true);
-                    showAlert('', '');
+
+
+    // --- Lieu Followup Table in Data Tab ---
+    function loadLieuFollowupTable() {
+        fetch('/get_lieu_followup_table').then(res => res.json()).then(data => {
+            renderLieuFollowupTable(data.columns, data.rows);
+        });
+    }
+
+    // --- Attendance Report Month Dropdown ---
+    // Khi vào tab Report, luôn load lại danh sách tháng và set tháng mới nhất
+    if (typeof showSection === 'function') {
+        const oldShowSection = showSection;
+        showSection = function(sectionId) {
+            oldShowSection(sectionId);
+            if (sectionId === 'reportSection') {
+                // Get available months and set to latest
+        fetch('/get_months').then(res => res.json()).then(data => {
+                    const months = data.months || [];
+                    const latest = data.latest || '';
                     
-                    fetch('/export')
-                        .then(response => {
-                            showLoading(false);
-                            if (!response.ok) {
-                                throw new Error('Export failed');
-                            }
-                            return response.blob();
-                        })
-                        .then(blob => {
-                            // Create download link
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.style.display = 'none';
-                            a.href = url;
-                            a.download = `AttendanceReport_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.xlsx`;
-                            document.body.appendChild(a);
-                            a.click();
-                            window.URL.revokeObjectURL(url);
-                            document.body.removeChild(a);
-                            
-                            showAlert('success', 'Export completed successfully!');
-                        })
-                        .catch(error => {
-                            showLoading(false);
-                            console.error('Export error:', error);
-                            showAlert('danger', 'Export failed. Please try again.');
-                        });
+                    // Set dropdown to latest month if available
+                    if (latest) {
+                        const [year, month] = latest.split('-');
+                        const monthSel = document.getElementById('attendanceMonth');
+                        const yearSel = document.getElementById('attendanceYear');
+                        if (monthSel && yearSel) {
+                            monthSel.value = parseInt(month);
+                            yearSel.value = parseInt(year);
+                            // Load the report for the latest month
+                            loadAttendanceReportTable();
+                        }
+                    }
                 });
             }
-        });
+        }
+    }
 
+    // Lieu Followup event handlers for Data tab
+    document.addEventListener('DOMContentLoaded', function() {
+        // Import button
+        const lieuFollowupImportBtn = document.getElementById('lieuFollowupImportBtn');
+        if (lieuFollowupImportBtn) {
+            lieuFollowupImportBtn.onclick = function() {
+                const fileInput = document.getElementById('lieuFollowupImportFile');
+                if (!fileInput.files[0]) return alert('Choose a file.');
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                fetch('/import_lieu_followup', {
+                    method: 'POST',
+                    body: formData
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        loadLieuFollowupTable();
+                        showAlert('success', 'Lieu followup imported successfully!');
+                    } else {
+                        showAlert('danger', data.error || 'Import failed!');
+                    }
+                });
+            };
+        }
+
+        // Add button
+        const lieuFollowupAddBtn = document.getElementById('lieuFollowupAddBtn');
+        if (lieuFollowupAddBtn) {
+            lieuFollowupAddBtn.onclick = function() {
+                const name = prompt('Employee name?');
+                if (!name) return;
+                const remain = prompt('Lieu remain previous month?', '0');
+                fetch('/add_lieu_followup_row', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({Name: name, 'Lieu remain previous month': remain})
+                }).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        loadLieuFollowupTable();
+                        showAlert('success', 'Row added successfully!');
+                    } else {
+                        showAlert('danger', data.error || 'Add failed!');
+                    }
+                });
+            };
+        }
+    });
     </script>
 </body>
 </html> 
