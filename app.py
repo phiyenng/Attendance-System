@@ -549,17 +549,15 @@ def import_apply():
                     return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
         else:
             df = pd.read_excel(file_path)
-
-            # Xử lý như cũ
-            df = translate_apply_headers(df)
-            df = filter_apply_employees(df, employee_list_df)
-            df = add_apply_columns(df)
-            apply_data = df.reset_index(drop=True)
-            return jsonify({
-                'success': True,
-                'message': f'Apply data imported successfully. Loaded {len(df)} rows.',
-                'rows': len(df)
-            })
+        df = translate_apply_headers(df)
+        df = filter_apply_employees(df, employee_list_df)
+        df = add_apply_columns(df)
+        apply_data = df.reset_index(drop=True)
+        return jsonify({
+            'success': True,
+            'message': f'Apply data imported successfully. Loaded {len(df)} rows.',
+            'rows': len(df)
+        })
     else:
         return jsonify({'error': 'Invalid file type'}), 400
 
@@ -749,7 +747,16 @@ def export():
             except Exception as e:
                 print(f"Error calculating Total Attendance Detail: {e}")
 
-
+        # 9. Attendance Report (calculated)
+        if 'Attendance Report' in wb.sheetnames:
+            try:
+                attendance_report_result = calculate_attendance_report_for_export()
+                if isinstance(attendance_report_result, dict) and 'columns' in attendance_report_result and 'rows' in attendance_report_result:
+                    attendance_report_df = pd.DataFrame(attendance_report_result['rows'], columns=attendance_report_result['columns'])
+                    if not attendance_report_df.empty:
+                        write_df_to_sheet(wb['Attendance Report'], attendance_report_df, start_row=7)
+            except Exception as e:
+                print(f"Error calculating Attendance Report: {e}")
 
         # Lưu file và trả về
         wb.save(file_path)
@@ -1487,6 +1494,170 @@ def calculate_otlieu_before():
                     next6 = cur.replace(hour=6, minute=0)
                     if next6 <= cur: next6 += pd.Timedelta(days=1)
 
+# ==== TÍNH TOÁN OT LIEU BEFORE (HÀM CHUNG) ====
+def calculate_otlieu_before():
+    global rules
+    
+    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_excel(path)
+
+    # Load Lieu followup
+    lieu_followup_path = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
+    if os.path.exists(lieu_followup_path):
+        lieu_followup_df = pd.read_excel(lieu_followup_path)
+    else:
+        lieu_followup_df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
+    
+    # Load rules if not loaded
+    if rules is None or rules.empty:
+        rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
+        if os.path.exists(rules_path):
+            rules = pd.read_excel(rules_path)
+            print(f"Loaded rules from file: {len(rules)} rows")
+        else:
+            rules = pd.DataFrame()
+            print("Rules file not found, using empty DataFrame")
+    else:
+        print(f"Using existing rules: {len(rules)} rows")
+
+    # Build remain map: {name: remain}
+    lieu_remain_map = {}
+    if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
+        for _, r in lieu_followup_df.iterrows():
+            name = str(r['Name']).strip()
+            try:
+                remain = float(r['Lieu remain previous month'])
+            except:
+                remain = 0.0
+            lieu_remain_map[name] = remain
+
+    ot_payment_types = [
+        'Weekday Rate 150%',
+        'Weekday-night Rate 200%',
+        'Weekend Rate 200%',
+        'Weekend-night Rate 270%',
+        'Holiday Rate 300%',
+        'Holiday-night Rate 390%',
+    ]
+    change_in_lieu_types = ot_payment_types.copy()
+    for col in ot_payment_types:
+        df['OT Payment: ' + col] = 0.0
+    for col in change_in_lieu_types:
+        df['Change in lieu: ' + col] = 0.0
+
+    # Hàm xác định loại ngày
+    def get_day_type(dt, holidays, special_weekends, special_workdays):
+        if dt in holidays:
+            return 'Holiday'
+        if dt in special_workdays:
+            return 'Weekday'
+        if dt in special_weekends:
+            return 'Weekend'
+        if dt.weekday() >= 5:
+            return 'Weekend'
+        return 'Weekday'
+
+    holidays = set()
+    special_workdays = set()
+    special_weekends = set()
+    try:
+        if rules is not None:
+            if 'Holiday Date in This Year' in rules.columns:
+                holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
+            if 'Special Work Day' in rules.columns:
+                special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
+            if 'Special Weekend' in rules.columns:
+                special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
+    except: pass
+
+    # --- BẮT ĐẦU LOGIC TÍNH OT RATES ---
+    for idx, row in df.iterrows():
+        emp_id = row['Emp ID'] if 'Emp ID' in row else None
+        intern = is_intern(emp_id, employee_list_df)
+        
+        # Ưu tiên lấy từ cột 'Date', sau đó 'OT date', sau đó 'Lieu Date'
+        ot_date = None
+        if 'Date' in df.columns and pd.notna(row.get('Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Date']).date()
+            except:
+                pass
+        elif 'OT date' in df.columns and pd.notna(row.get('OT date', None)):
+            try:
+                ot_date = pd.to_datetime(row['OT date']).date()
+            except:
+                pass
+        elif 'Lieu Date' in df.columns and pd.notna(row.get('Lieu Date', None)):
+            try:
+                ot_date = pd.to_datetime(row['Lieu Date']).date()
+            except:
+                pass
+        if ot_date is None:
+            continue
+
+        # Lấy OT From và OT To
+        ot_from, ot_to = None, None
+        for col in df.columns:
+            if 'ot' in col.lower() and 'from' in col.lower():
+                ot_from = row[col]
+            if 'ot' in col.lower() and 'to' in col.lower():
+                ot_to = row[col]
+        if not ot_from or not ot_to or pd.isna(ot_from) or pd.isna(ot_to):
+            continue
+        try:
+            t1 = pd.to_datetime(str(ot_from), format='%H:%M')
+            t2 = pd.to_datetime(str(ot_to), format='%H:%M')
+        except:
+            continue
+        if t2 < t1:
+            t2 += pd.Timedelta(days=1)
+
+        # Tính OT theo từng block thời gian
+        cur = t1
+        while cur < t2:
+            hour = cur.hour + cur.minute / 60
+            if 6 <= hour < 22:
+                block_end = min(cur.replace(hour=22, minute=0), t2)
+                block_type = 'day'
+            else:
+                if hour < 6:
+                    next6 = cur.replace(hour=6, minute=0)
+                    if next6 <= cur: next6 += pd.Timedelta(days=1)
+                    block_end = min(next6, t2)
+                else:
+                    next22 = cur.replace(hour=22, minute=0)
+                    if next22 <= cur: next22 += pd.Timedelta(days=1)
+                    block_end = min(next22, t2)
+                block_type = 'night'
+            block_date = (ot_date if cur.day == t1.day else ot_date + pd.Timedelta(days=1))
+            day_type = get_day_type(block_date, holidays, special_weekends, special_workdays)
+            hours = (block_end - cur).total_seconds() / 3600
+
+            if block_type == 'day':
+                lunch_start = cur.replace(hour=12, minute=0)
+                lunch_end = cur.replace(hour=13, minute=30)
+                overlap = max(timedelta(0), min(block_end, lunch_end) - max(cur, lunch_start)).total_seconds() / 3600
+                if overlap > 0:
+                    hours -= overlap
+
+            target_prefix = 'Change in lieu: ' if intern else 'OT Payment: '
+            rate_map = {
+                ('Weekday', 'day'): 'Weekday Rate 150%',
+                ('Weekday', 'night'): 'Weekday-night Rate 200%',
+                ('Weekend', 'day'): 'Weekend Rate 200%',
+                ('Weekend', 'night'): 'Weekend-night Rate 270%',
+                ('Holiday', 'day'): 'Holiday Rate 300%',
+                ('Holiday', 'night'): 'Holiday-night Rate 390%',
+            }
+            rate_label = rate_map.get((day_type, block_type))
+            if rate_label:
+                col = target_prefix + rate_label
+                df.at[idx, col] += hours
+            cur = block_end
+
+
     # --- LOGIC TRỪ LIEU ---
     for idx, row in df.iterrows():
         name = row['Name'] if 'Name' in row else None
@@ -2163,10 +2334,6 @@ def get_total_attendance_detail():
 
 @app.route('/get_attendance_report')
 def get_attendance_report():
-    # Get month and year from request parameters
-    month = request.args.get('month', type=int)
-    year = request.args.get('year', type=int)
-    
     # Lấy dữ liệu từ các file tạm trước
     signinout_data,apply_data,ot_lieu_data = [], [], []
     
@@ -2182,8 +2349,6 @@ def get_attendance_report():
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
         ot_lieu_data = otlieu_df.to_dict('records')
 
-    # If month/year not provided, auto-detect from data
-    if month is None or year is None:
     month, year = 7, 2024
     if signinout_data:
         dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
@@ -2615,65 +2780,6 @@ def remove_file_from_data():
         
     except Exception as e:
         return jsonify({'error': f'Error removing file: {str(e)}'}), 400
-    
-# API trả về lieu followup cho tab Data
-@app.route('/get_lieu_followup_table')
-def get_lieu_followup_table():
-    LIEU_FOLLOWUP_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
-    if os.path.exists(LIEU_FOLLOWUP_PATH):
-        df = pd.read_excel(LIEU_FOLLOWUP_PATH)
-    else:
-        df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
-    # Đảm bảo có cột STT
-    if 'STT' not in df.columns:
-        df.insert(0, 'STT', range(1, len(df) + 1))
-    cols = list(df.columns)
-    rows = df.fillna('').astype(str).values.tolist()
-    return jsonify({'columns': cols, 'rows': rows})
-
-# API trả về danh sách tháng có trong dữ liệu apply/otlieu và tháng mới nhất
-@app.route('/get_months', methods=['GET'])
-def get_months():
-    """Trả về danh sách tháng (yyyy-mm) có trong dữ liệu apply và otlieu, cùng tháng mới nhất"""
-    months = set()
-    # Lấy từ apply_data
-    if apply_data is not None and not apply_data.empty:
-        for col in ['Start Date', 'End Date', '起始时间', '终止时间', 'Apply Date', '申请时间']:
-            if col in apply_data.columns:
-                vals = apply_data[col].dropna().astype(str)
-                for v in vals:
-                    m = None
-                    # Tìm yyyy-mm hoặc yyyy/mm
-                    m1 = re.search(r'(20\d{2})[-/](0[1-9]|1[0-2])', v)
-                    if m1:
-                        months.add(f"{m1.group(1)}-{m1.group(2)}")
-                    else:
-                        # fallback: parse date
-                        try:
-                            dt = pd.to_datetime(v, errors='coerce')
-                            if pd.notna(dt):
-                                months.add(dt.strftime('%Y-%m'))
-                        except: pass
-    # Lấy từ ot_lieu_data
-    if ot_lieu_data is not None and not ot_lieu_data.empty:
-        for col in ['Date', 'OT date', 'Lieu Date']:
-            if col in ot_lieu_data.columns:
-                vals = ot_lieu_data[col].dropna().astype(str)
-                for v in vals:
-                    m1 = re.search(r'(20\d{2})[-/](0[1-9]|1[0-2])', v)
-                    if m1:
-                        months.add(f"{m1.group(1)}-{m1.group(2)}")
-                    else:
-                        try:
-                            dt = pd.to_datetime(v, errors='coerce')
-                            if pd.notna(dt):
-                                months.add(dt.strftime('%Y-%m'))
-                        except: pass
-    # Loại bỏ giá trị không hợp lệ
-    months = {m for m in months if re.match(r'^20\d{2}-[01]\d$', m)}
-    months = sorted(months)
-    latest_month = months[-1] if months else ''
-    return jsonify({'months': months, 'latest': latest_month})
 
 @app.route('/get_current_data_info', methods=['GET'])
 def get_current_data_info():
@@ -3228,7 +3334,357 @@ def calculate_total_attendance_detail_for_export():
         traceback.print_exc()
         return {'columns': [], 'rows': []}
 
+def calculate_attendance_report_for_export():
+    """Calculate Attendance Report data for export (without request context)"""
+    global sign_in_out_data, apply_data, ot_lieu_data, employee_list_df, rules
+    
+    # Load data from temp files if global variables are empty
+    if sign_in_out_data is None or sign_in_out_data.empty:
+        temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
+        if os.path.exists(temp_signinout_path):
+            sign_in_out_data = pd.read_excel(temp_signinout_path)
+        else:
+            return {'columns': [], 'rows': []}
+    
+    if apply_data is None or apply_data.empty:
+        temp_apply_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
+        if os.path.exists(temp_apply_path):
+            apply_data = pd.read_excel(temp_apply_path)
+        else:
+            return {'columns': [], 'rows': []}
+    
+    if ot_lieu_data is None or ot_lieu_data.empty:
+        temp_otlieu_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
+        if os.path.exists(temp_otlieu_path):
+            ot_lieu_data = pd.read_excel(temp_otlieu_path)
+        else:
+            return {'columns': [], 'rows': []}
+    
+    if employee_list_df is None or employee_list_df.empty:
+        emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
+        if os.path.exists(emp_path):
+            employee_list_df = pd.read_csv(emp_path, dtype=str)
+        else:
+            return {'columns': [], 'rows': []}
+    
+    if rules is None or rules.empty:
+        rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
+        if os.path.exists(rules_path):
+            rules = pd.read_excel(rules_path)
+        else:
+            return {'columns': [], 'rows': []}
+    
+    try:
+        # Tự động xác định tháng/năm từ dữ liệu signin/out
+        month = 7  # default
+        year = 2024  # default
+        
+        if not sign_in_out_data.empty:
+            # Tìm ngày đầu tiên và cuối cùng trong dữ liệu signin/out
+            dates = []
+            for _, record in sign_in_out_data.iterrows():
+                if 'attendance_time' in record and pd.notna(record['attendance_time']):
+                    try:
+                        date_val = pd.to_datetime(record['attendance_time'])
+                        dates.append(date_val)
+                    except:
+                        continue
+            
+            if dates:
+                min_date = min(dates)
+                max_date = max(dates)
+                
+                # Tìm tháng phổ biến nhất trong dữ liệu
+                month_counts = {}
+                for date in dates:
+                    month_key = (date.month, date.year)
+                    month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                
+                # Lấy tháng/năm có nhiều dữ liệu nhất
+                most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                month, year = most_common_month
+                
+                print(f"Auto-detected month/year from signin/out data (export): {month}/{year}")
+                print(f"Date range in data: {min_date.date()} to {max_date.date()}")
+                print(f"Month distribution: {month_counts}")
+        
+        # Calculate date range: 20th of previous month to 19th of current month
+        if month == 1:
+            prev_month = 12
+            prev_year = year - 1
+        else:
+            prev_month = month - 1
+            prev_year = year
+        
+        start_date = pd.Timestamp(prev_year, prev_month, 20)
+        end_date = pd.Timestamp(year, month, 19)
+        days = pd.date_range(start=start_date, end=end_date, freq='D')
+        day_cols = [d.strftime('%Y-%m-%d') for d in days]
+        
+        # Get special days from rules
+        holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
+        
+        # Helper functions
+        def get_day_type(dt, holidays, special_weekends, special_workdays):
+            dt_date = dt.date()
+            if dt_date in holidays:
+                return 'Holiday'
+            if dt_date in special_workdays:
+                return 'Weekday'
+            if dt_date in special_weekends:
+                return 'Weekend'
+            if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
+                return 'Weekend'
+            return 'Weekday'
+        
+        def extract_name_from_emp_name(emp_name):
+            # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
+            import re
+            match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
+            if match:
+                return match.group(1).strip()
+            return emp_name.strip()
+        
+        def is_lieu_day(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
+                return False
+            target_name = extract_name_from_emp_name(emp_name)
+            for _, record in ot_lieu_data.iterrows():
+                name_val = str(record.get('Name', '') or '')
+                if name_val.strip() == target_name:
+                    lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+                    for col in lieu_cols:
+                        if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                            try:
+                                lieu_date = pd.to_datetime(record[col]).date()
+                                if lieu_date == check_date:
+                                    return True
+                            except:
+                                continue
+            return False
 
+        def has_ot_on_date(emp_name, check_date, ot_lieu_data):
+            if ot_lieu_data is None or ot_lieu_data.empty:
+                return False
+            target_name = extract_name_from_emp_name(emp_name)
+            for _, record in ot_lieu_data.iterrows():
+                name_val = str(record.get('Name', '') or '')
+                if name_val.strip() == target_name:
+                    ot_date_cols = ['OT Date', 'Date', 'OT date']
+                    for col in ot_date_cols:
+                        if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                            try:
+                                ot_date = pd.to_datetime(record[col]).date()
+                                if ot_date == check_date:
+                                    return True
+                            except:
+                                continue
+            return False
+        
+        def calculate_actual_hours(check_in_time, check_out_time):
+            if not check_in_time or not check_out_time:
+                return 0, 0
+            
+            if isinstance(check_in_time, str):
+                try:
+                    check_in_time = pd.to_datetime(check_in_time)
+                except:
+                    return 0, 0
+            if isinstance(check_out_time, str):
+                try:
+                    check_out_time = pd.to_datetime(check_out_time)
+                except:
+                    return 0, 0
+            
+            if check_in_time.hour <= 12 and check_out_time.hour >= 13:
+                morning_hours = min(12 - check_in_time.hour - check_in_time.minute/60, 4)
+                afternoon_hours = min(check_out_time.hour + check_out_time.minute/60 - 13.5, 4.5)
+                total_hours = morning_hours + afternoon_hours
+            else:
+                total_hours = (check_out_time - check_in_time).total_seconds() / 3600
+            
+            if total_hours < 8:
+                late_minutes = (8 - total_hours) * 60
+            else:
+                late_minutes = 0
+                
+            return total_hours, late_minutes
+        
+        def get_apply_info_for_date(emp_name, check_date, apply_data):
+            if apply_data is None or apply_data.empty:
+                return None
+            target_name = extract_name_from_emp_name(emp_name)
+            for _, record in apply_data.iterrows():
+                if (record.get('Name', '').strip() == target_name and 
+                    record.get('Results') == 'Approved'):
+                    
+                    try:
+                        start_date_str = record.get('Start Date', '')
+                        end_date_str = record.get('End Date', '')
+                        apply_date_str = record.get('Apply Date', '')
+                        
+                        if start_date_str:
+                            start_date = pd.to_datetime(start_date_str).date()
+                        elif apply_date_str:
+                            start_date = pd.to_datetime(apply_date_str).date()
+                        else:
+                            continue
+                            
+                        end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
+                        
+                        if start_date <= check_date <= end_date:
+                            return {
+                                'type': record.get('Type', ''),
+                                'leave_type': record.get('Leave Type', ''),
+                                'is_approved': record.get('Results') == 'Approved'
+                            }
+                    except:
+                        continue
+            return None
+        
+        # Create result rows
+        result_rows = []
+        row_no = 1
+        
+        for _, emp in employee_list_df.iterrows():
+            emp_name = emp['Name']
+            emp_dept = emp.get('Dept', '')
+            
+            # Create 2 rows for each employee: Morning shift & Afternoon shift
+            for shift in ['Morning shift', 'Afternoon shift']:
+                row = {
+                    'Department': emp_dept,
+                    'Name': emp_name,
+                    'Shift': shift
+                }
+                
+                # Add day columns
+                for day in days:
+                    day_str = day.strftime('%Y-%m-%d')
+                    day_type = get_day_type(day, holidays, special_weekends, special_workdays)
+                    day_date = day.date()
+                    
+                    # Process weekday (Monday to Friday, no Lieu)
+                    if day_type == 'Weekday' and not is_lieu_day(emp_name, day_date, ot_lieu_data):
+                        
+                        # Get signinout data for this day
+                        day_signinout = []
+                        if sign_in_out_data is not None and not sign_in_out_data.empty:
+                            df_sign = sign_in_out_data.copy()
+                            if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
+                                df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+                                df_sign['date'] = df_sign['attendance_time'].dt.date
+                                target_name = extract_name_from_emp_name(emp_name)
+                                mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == day_date)
+                                day_signinout = df_sign[mask]['attendance_time'].tolist()
+                        
+                        # Get apply info for this day
+                        apply_info = get_apply_info_for_date(emp_name, day_date, apply_data)
+                        
+                        # Process based on apply type
+                        if apply_info:
+                            apply_type = apply_info['type']
+                            leave_type = apply_info['leave_type'].lower()
+                            
+                            if apply_type == 'Leave':
+                                row[day_str] = 'L'  # Leave
+                            elif apply_type == 'Supplement':
+                                if day_signinout:
+                                    # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất và muộn nhất
+                                    morning_times = [t for t in day_signinout if t.hour < 12]
+                                    afternoon_times = [t for t in day_signinout if t.hour >= 12]
+                                    
+                                    if morning_times and afternoon_times:
+                                        check_in = min(morning_times)  # Thời gian sớm nhất buổi sáng
+                                        check_out = max(afternoon_times)  # Thời gian muộn nhất buổi chiều
+                                    else:
+                                        check_in = min(day_signinout)
+                                        check_out = max(day_signinout)
+                                    
+                                    actual_hours, late_minutes = calculate_actual_hours(check_in, check_out)
+                                    
+                                    if actual_hours >= 8:
+                                        row[day_str] = 'N'  # Normal
+                                    else:
+                                        row[day_str] = 'LS'  # Late/Soon
+                                else:
+                                    row[day_str] = 'S'  # Supplement
+                            elif apply_type == 'Trip':
+                                row[day_str] = 'T'  # Trip
+                        else:
+                            # No apply, calculate normal working
+                            if day_signinout:
+                                check_in = min(day_signinout)
+                                check_out = max(day_signinout)
+                                actual_hours, late_minutes = calculate_actual_hours(check_in, check_out)
+                                
+                                if actual_hours >= 8:
+                                    row[day_str] = 'N'  # Normal
+                                else:
+                                    row[day_str] = 'LS'  # Late/Soon
+                                    
+                                    if actual_hours < 4:
+                                        row[day_str] = 'M'  # Miss
+                            else:
+                                row[day_str] = 'M'  # Miss
+                    else:
+                        # Not a weekday or has Lieu
+                        if day_type == 'Holiday':
+                            row[day_str] = 'H'  # Holiday
+                        elif day_type == 'Weekend':
+                            row[day_str] = 'W'  # Weekend
+                        elif is_lieu_day(emp_name, day_date, ot_lieu_data):
+                            row[day_str] = 'LE'  # Lieu
+                        elif has_ot_on_date(emp_name, day_date, ot_lieu_data):
+                            row[day_str] = 'OT'  # OT
+                        else:
+                            row[day_str] = ''  # Empty
+                
+                # Calculate summary
+                summary = {'Normal': 0, 'Leave': 0, 'Trip': 0, 'Miss': 0, 'Late/Soon': 0, 'Lieu': 0, 'OT': 0, 'Supplement': 0}
+                for day in days:
+                    day_str = day.strftime('%Y-%m-%d')
+                    val = row.get(day_str, '')
+                    if val == 'N': summary['Normal'] += 1
+                    elif val == 'L': summary['Leave'] += 1
+                    elif val == 'T': summary['Trip'] += 1
+                    elif val == 'M': summary['Miss'] += 1
+                    elif val == 'LS': summary['Late/Soon'] += 1
+                    elif val == 'LE': summary['Lieu'] += 1
+                    elif val == 'OT': summary['OT'] += 1
+                    elif val == 'S': summary['Supplement'] += 1
+                
+                row.update(summary)
+                result_rows.append(row)
+                row_no += 1
+        
+        if not result_rows:
+            return {'columns': [], 'rows': []}
+        
+        # Create DataFrame
+        result = pd.DataFrame(result_rows)
+        
+        # Define column order
+        columns = ['Department', 'Name', 'Shift'] + day_cols + [
+            'Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'OT', 'Supplement'
+        ]
+        
+        # Ensure all columns exist
+        for col in columns:
+            if col not in result.columns:
+                result[col] = ''
+        
+        # Sort by column order
+        result = result[columns]
+        
+        cols = list(result.columns)
+        rows = result.fillna('').astype(str).values.tolist()
+        
+        return {'columns': cols, 'rows': rows}
+        
+    except Exception as e:
+        print(f"Error in calculate_attendance_report_for_export: {e}")
+        return {'columns': [], 'rows': []}
 
 
 # ==========================
