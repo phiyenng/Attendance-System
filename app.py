@@ -26,7 +26,7 @@ RULES_XLSX_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Global variables to store data
+# Global variables to store data with caching
 sign_in_out_data = None
 apply_data = None
 ot_lieu_data = None
@@ -37,8 +37,27 @@ rules = None
 global lieu_followup_df
 lieu_followup_df = None
 
-# Cache for expensive computations
-_calculation_cache = {}
+# Cache for expensive calculations
+_attendance_report_cache = {}
+_total_attendance_cache = {}
+_cache_timeout = 300  # 5 minutes
+
+def _get_cache_key():
+    """Generate cache key based on file modification times"""
+    files = [TEMP_SIGNINOUT_PATH, TEMP_APPLY_PATH, TEMP_OTLIEU_PATH, EMPLOYEE_LIST_PATH, RULES_XLSX_PATH]
+    mod_times = []
+    for file_path in files:
+        if os.path.exists(file_path):
+            mod_times.append(str(int(os.path.getmtime(file_path))))
+        else:
+            mod_times.append("0")
+    return "_".join(mod_times)
+
+def _clear_cache():
+    """Clear all cached data"""
+    global _attendance_report_cache, _total_attendance_cache
+    _attendance_report_cache.clear()
+    _total_attendance_cache.clear()
 
 # ==========================
 # EMPLOYEE LIST
@@ -469,16 +488,6 @@ def load_excel_data(file_path, sheet_name=None):
         print(f"Error loading Excel file: {e}")
         return None
 
-def save_excel_data(file_path, data, sheet_name):
-    """Save data back to Excel file"""
-    try:
-        with pd.ExcelWriter(file_path, engine='openpyxl', mode='a') as writer:
-            data.to_excel(writer, sheet_name=sheet_name, index=False)
-        return True
-    except Exception as e:
-        print(f"Error saving Excel file: {e}")
-        return False
-
 # ========================
 # APP ROUTE
 # ========================
@@ -751,6 +760,24 @@ def export():
             except Exception as e:
                 print(f"Error calculating Total Attendance Detail: {e}")
 
+        # 9. Abnormal Late/Early Data
+        if 'Abnormal LateCome-EarlyLeave' in wb.sheetnames:
+            try:
+                abnormal_late_early_df = calculate_abnormal_late_early_for_export()
+                if abnormal_late_early_df is not None and not abnormal_late_early_df.empty:
+                    write_df_to_sheet(wb['Abnormal LateCome-EarlyLeave'], abnormal_late_early_df, start_row=2)
+            except Exception as e:
+                print(f"Error calculating Abnormal Late/Early data: {e}")
+
+        # 10. Abnormal Missing Data
+        if 'Abnormal Missing' in wb.sheetnames:
+            try:
+                abnormal_missing_df = calculate_abnormal_missing_for_export()
+                if abnormal_missing_df is not None and not abnormal_missing_df.empty:
+                    write_df_to_sheet(wb['Abnormal Missing'], abnormal_missing_df, start_row=2)
+            except Exception as e:
+                print(f"Error calculating Abnormal Missing data: {e}")
+
         # Lưu file và trả về
         wb.save(file_path)
         wb.close()
@@ -998,10 +1025,6 @@ def remove_employee():
         return jsonify({'success': True, 'message': 'Employee removed.'})
     except Exception as e:
         return jsonify({'error': f'Failed to remove employee: {str(e)}'}), 400
-
-@app.route('/calculate_prep_data', methods=['POST'])
-def calculate_prep_data():
-    return jsonify({'success': True, 'message': 'Prepare data calculation completed.'})
 
 @app.route('/get_signinout_data')
 def get_signinout_data():
@@ -1486,138 +1509,6 @@ def calculate_otlieu_before():
                 if hour < 6:
                     next6 = cur.replace(hour=6, minute=0)
                     if next6 <= cur: next6 += pd.Timedelta(days=1)
-
-# ==== TÍNH TOÁN OT LIEU BEFORE (HÀM CHUNG) ====
-def calculate_otlieu_before():
-    global rules
-    
-    path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    df = pd.read_excel(path)
-
-    # Load Lieu followup
-    lieu_followup_path = os.path.join(app.config['UPLOAD_FOLDER'], 'lieu_followup.xlsx')
-    if os.path.exists(lieu_followup_path):
-        lieu_followup_df = pd.read_excel(lieu_followup_path)
-    else:
-        lieu_followup_df = pd.DataFrame(columns=['Name', 'Lieu remain previous month'])
-    
-    # Load rules if not loaded
-    if rules is None or rules.empty:
-        rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
-        if os.path.exists(rules_path):
-            rules = pd.read_excel(rules_path)
-            print(f"Loaded rules from file: {len(rules)} rows")
-        else:
-            rules = pd.DataFrame()
-            print("Rules file not found, using empty DataFrame")
-    else:
-        print(f"Using existing rules: {len(rules)} rows")
-
-    # Build remain map: {name: remain}
-    lieu_remain_map = {}
-    if 'Name' in lieu_followup_df.columns and 'Lieu remain previous month' in lieu_followup_df.columns:
-        for _, r in lieu_followup_df.iterrows():
-            name = str(r['Name']).strip()
-            try:
-                remain = float(r['Lieu remain previous month'])
-            except:
-                remain = 0.0
-            lieu_remain_map[name] = remain
-
-    ot_payment_types = [
-        'Weekday Rate 150%',
-        'Weekday-night Rate 200%',
-        'Weekend Rate 200%',
-        'Weekend-night Rate 270%',
-        'Holiday Rate 300%',
-        'Holiday-night Rate 390%',
-    ]
-    change_in_lieu_types = ot_payment_types.copy()
-    for col in ot_payment_types:
-        df['OT Payment: ' + col] = 0.0
-    for col in change_in_lieu_types:
-        df['Change in lieu: ' + col] = 0.0
-
-    # Hàm xác định loại ngày
-    def get_day_type(dt, holidays, special_weekends, special_workdays):
-        if dt in holidays:
-            return 'Holiday'
-        if dt in special_workdays:
-            return 'Weekday'
-        if dt in special_weekends:
-            return 'Weekend'
-        if dt.weekday() >= 5:
-            return 'Weekend'
-        return 'Weekday'
-
-    holidays = set()
-    special_workdays = set()
-    special_weekends = set()
-    try:
-        if rules is not None:
-            if 'Holiday Date in This Year' in rules.columns:
-                holidays = set(pd.to_datetime(rules['Holiday Date in This Year'], errors='coerce').dt.date.dropna())
-            if 'Special Work Day' in rules.columns:
-                special_workdays = set(pd.to_datetime(rules['Special Work Day'], errors='coerce').dt.date.dropna())
-            if 'Special Weekend' in rules.columns:
-                special_weekends = set(pd.to_datetime(rules['Special Weekend'], errors='coerce').dt.date.dropna())
-    except: pass
-
-    # --- BẮT ĐẦU LOGIC TÍNH OT RATES ---
-    for idx, row in df.iterrows():
-        emp_id = row['Emp ID'] if 'Emp ID' in row else None
-        intern = is_intern(emp_id, employee_list_df)
-        
-        # Ưu tiên lấy từ cột 'Date', sau đó 'OT date', sau đó 'Lieu Date'
-        ot_date = None
-        if 'Date' in df.columns and pd.notna(row.get('Date', None)):
-            try:
-                ot_date = pd.to_datetime(row['Date']).date()
-            except:
-                pass
-        elif 'OT date' in df.columns and pd.notna(row.get('OT date', None)):
-            try:
-                ot_date = pd.to_datetime(row['OT date']).date()
-            except:
-                pass
-        elif 'Lieu Date' in df.columns and pd.notna(row.get('Lieu Date', None)):
-            try:
-                ot_date = pd.to_datetime(row['Lieu Date']).date()
-            except:
-                pass
-        if ot_date is None:
-            continue
-
-        # Lấy OT From và OT To
-        ot_from, ot_to = None, None
-        for col in df.columns:
-            if 'ot' in col.lower() and 'from' in col.lower():
-                ot_from = row[col]
-            if 'ot' in col.lower() and 'to' in col.lower():
-                ot_to = row[col]
-        if not ot_from or not ot_to or pd.isna(ot_from) or pd.isna(ot_to):
-            continue
-        try:
-            t1 = pd.to_datetime(str(ot_from), format='%H:%M')
-            t2 = pd.to_datetime(str(ot_to), format='%H:%M')
-        except:
-            continue
-        if t2 < t1:
-            t2 += pd.Timedelta(days=1)
-
-        # Tính OT theo từng block thời gian
-        cur = t1
-        while cur < t2:
-            hour = cur.hour + cur.minute / 60
-            if 6 <= hour < 22:
-                block_end = min(cur.replace(hour=22, minute=0), t2)
-                block_type = 'day'
-            else:
-                if hour < 6:
-                    next6 = cur.replace(hour=6, minute=0)
-                    if next6 <= cur: next6 += pd.Timedelta(days=1)
                     block_end = min(next6, t2)
                 else:
                     next22 = cur.replace(hour=22, minute=0)
@@ -1894,6 +1785,18 @@ def get_otlieu_report():
 
 @app.route('/get_total_attendance_detail')
 def get_total_attendance_detail():
+    global _total_attendance_cache
+    
+    # Create cache key based on file modification times
+    cache_key = f"total_attendance_{_get_cache_key()}"
+    current_time = datetime.now().timestamp()
+    
+    # Check if cached result is still valid
+    if cache_key in _total_attendance_cache:
+        cached_data, timestamp = _total_attendance_cache[cache_key]
+        if current_time - timestamp < _cache_timeout:
+            return jsonify(cached_data)
+    
     emp_path = EMPLOYEE_LIST_PATH
     if os.path.exists(emp_path):
         emp_df = pd.read_csv(emp_path, dtype=str)
@@ -1934,10 +1837,8 @@ def get_total_attendance_detail():
     for col in attendance_cols:
         result[col] = 0.0
 
-    # Lấy dữ liệu từ các file tạm
-    signinout_data = []
-    apply_data = []
-    ot_lieu_data = []
+    # Load và pre-process tất cả dữ liệu một lần
+    signinout_data, apply_data, ot_lieu_data = [], [], []
     
     if os.path.exists(TEMP_SIGNINOUT_PATH):
         signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
@@ -1957,18 +1858,21 @@ def get_total_attendance_detail():
     # Xác định khoảng thời gian tính toán (20 tháng trước đến 19 tháng này)
     today = datetime.now()
     if today.day >= 20:
-        # Nếu hôm nay từ ngày 20 trở đi, tính từ 20 tháng trước đến 19 tháng này
         start_date = today.replace(day=20) - timedelta(days=30)
         end_date = today.replace(day=19)
     else:
-        # Nếu hôm nay trước ngày 20, tính từ 20 tháng trước đến 19 tháng trước
         start_date = today.replace(day=20) - timedelta(days=60)
         end_date = today.replace(day=19) - timedelta(days=30)
     
-    # Tạo danh sách ngày trong khoảng thời gian
     date_range = pd.date_range(start=start_date, end=end_date, freq='D')
 
-    # Hàm xác định loại ngày
+    # Helper functions
+    def normalize_name(name_field):
+        if not isinstance(name_field, str):
+            return ""
+        name_only = re.sub(r'\d{8,}$', '', name_field).strip()
+        return name_only.lower()
+
     def get_day_type(dt, holidays, special_weekends, special_workdays):
         dt_date = dt.date()
         if dt_date in holidays:
@@ -1977,307 +1881,244 @@ def get_total_attendance_detail():
             return 'Weekday'
         if dt_date in special_weekends:
             return 'Weekend'
-        if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        if dt.weekday() >= 5:
             return 'Weekend'
         return 'Weekday'
 
-    # Hàm xử lý matching tên nhân viên
     def extract_name_from_emp_name(emp_name):
-        # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
         import re
+        if not isinstance(emp_name, str):
+            return ""
         match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
         if match:
             return match.group(1).strip()
         return emp_name.strip()
 
-    # Hàm kiểm tra nhân viên có nghỉ Lieu ngày đó không
-    def is_lieu_day(emp_name, check_date, ot_lieu_data):
-        target_name = extract_name_from_emp_name(emp_name)
-        for record in ot_lieu_data:
-            name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == target_name:
-                # Kiểm tra các cột Lieu From, Lieu To
-                lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
-                for col in lieu_cols:
-                    if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                        try:
-                            lieu_date = pd.to_datetime(record[col]).date()
-                            if lieu_date == check_date:
-                                return True
-                        except:
-                            continue
-        return False
+    # Pre-process signin/out data - chỉ tạo DataFrame một lần
+    df_sign_all = pd.DataFrame()
+    if signinout_data:
+        df_sign_all = pd.DataFrame(signinout_data)
+        if 'emp_name' in df_sign_all.columns and 'attendance_time' in df_sign_all.columns:
+            df_sign_all['attendance_time'] = pd.to_datetime(df_sign_all['attendance_time'], errors='coerce')
+            df_sign_all['date'] = df_sign_all['attendance_time'].dt.date
+            df_sign_all['target_name'] = df_sign_all['emp_name'].apply(extract_name_from_emp_name)
 
-    # Hàm kiểm tra có OT trong ngày không
-    def has_ot_on_date(emp_name, check_date, ot_lieu_data):
-        target_name = extract_name_from_emp_name(emp_name)
-        for record in ot_lieu_data:
-            name_val = str(record.get('Name', '') or '')
-            if name_val.strip() == target_name:
-                # Kiểm tra các cột OT Date, Date, OT date
-                ot_date_cols = ['OT Date', 'Date', 'OT date']
-                for col in ot_date_cols:
-                    if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                        try:
-                            ot_date = pd.to_datetime(record[col]).date()
-                            if ot_date == check_date:
-                                return True
-                        except:
-                            continue
-        return False
+    # Pre-process apply data cho lookup nhanh hơn
+    apply_lookup = {}
+    for record in apply_data:
+        if (record.get('Type') == 'Leave' and record.get('Results') == 'Approved'):
+            target_name = extract_name_from_emp_name(record.get('Name', ''))
+            if target_name not in apply_lookup:
+                apply_lookup[target_name] = []
+            apply_lookup[target_name].append(record)
 
-    # Hàm kiểm tra có Apply Leave trong ngày không
-    def has_apply_leave_on_date(emp_name, check_date, apply_data):
-        target_name = extract_name_from_emp_name(emp_name)
-        for record in apply_data:
-            if (record.get('Name', '').strip() == target_name and 
-                record.get('Type') == 'Leave' and 
-                record.get('Results') == 'Approved'):
-                
-                try:
-                    start_date_str = record.get('Start Date', '')
-                    end_date_str = record.get('End Date', '')
-                    apply_date_str = record.get('Apply Date', '')
-                    
-                    if start_date_str:
-                        start_date = pd.to_datetime(start_date_str).date()
-                    elif apply_date_str:
-                        start_date = pd.to_datetime(apply_date_str).date()
-                    else:
+    # Pre-process ot/lieu data cho lookup nhanh hơn
+    ot_lieu_lookup = {}
+    for record in ot_lieu_data:
+        target_name = extract_name_from_emp_name(record.get('Name', ''))
+        if target_name not in ot_lieu_lookup:
+            ot_lieu_lookup[target_name] = []
+        ot_lieu_lookup[target_name].append(record)
+
+    # Optimized lookup functions
+    def is_lieu_day(target_name, check_date):
+        records = ot_lieu_lookup.get(target_name, [])
+        for record in records:
+            lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+            for col in lieu_cols:
+                if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                    try:
+                        lieu_date = pd.to_datetime(record[col]).date()
+                        if lieu_date == check_date:
+                            return True
+                    except:
                         continue
-                        
-                    end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
-                    
-                    # Kiểm tra check_date có trong khoảng start_date đến end_date không
-                    if start_date <= check_date <= end_date:
-                        return True
-                except:
-                    continue
         return False
 
-    # Hàm xác định ca làm việc từ signinout data
-    def get_shift_info(emp_name, check_date, signinout_data):
-        """Trả về thông tin ca làm việc: 'AM', 'PM', 'FULL', hoặc 'NONE'"""
-        if not signinout_data:
+    def has_ot_on_date(target_name, check_date):
+        records = ot_lieu_lookup.get(target_name, [])
+        for record in records:
+            ot_date_cols = ['OT Date', 'Date', 'OT date']
+            for col in ot_date_cols:
+                if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                    try:
+                        ot_date = pd.to_datetime(record[col]).date()
+                        if ot_date == check_date:
+                            return True
+                    except:
+                        continue
+        return False
+
+    def has_apply_leave_on_date(target_name, check_date):
+        records = apply_lookup.get(target_name, [])
+        for record in records:
+            try:
+                start_date_str = record.get('Start Date', '')
+                end_date_str = record.get('End Date', '')
+                apply_date_str = record.get('Apply Date', '')
+                
+                if start_date_str:
+                    start_date = pd.to_datetime(start_date_str).date()
+                elif apply_date_str:
+                    start_date = pd.to_datetime(apply_date_str).date()
+                else:
+                    continue
+                    
+                end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
+                
+                if start_date <= check_date <= end_date:
+                    return True
+            except:
+                continue
+        return False
+
+    def get_shift_info(target_name, check_date):
+        if df_sign_all.empty:
             return 'NONE'
             
-        df_sign = pd.DataFrame(signinout_data)
-        if 'emp_name' not in df_sign.columns or 'attendance_time' not in df_sign.columns:
-            return 'NONE'
-            
-        df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-        df_sign['date'] = df_sign['attendance_time'].dt.date
-        
-        target_name = extract_name_from_emp_name(emp_name)
-        
-        # Lọc bản ghi của nhân viên trong ngày
-        mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == check_date)
-        day_records = df_sign[mask]
+        # Filter records for this employee and date
+        mask = (df_sign_all['target_name'] == target_name) & (df_sign_all['date'] == check_date)
+        day_records = df_sign_all[mask]
         
         if day_records.empty:
             return 'NONE'
             
-        # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất cho mỗi loại (sáng/chiều)
+        # Process shift info
         morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
         afternoon_records = day_records[day_records['attendance_time'].dt.hour >= 12]
         
-        morning_times = []
-        afternoon_times = []
+        has_morning = not morning_records.empty
+        has_afternoon = not afternoon_records.empty
         
-        if not morning_records.empty:
-            # Lấy thời gian sớm nhất trong buổi sáng
-            earliest_morning = morning_records['attendance_time'].min()
-            morning_times.append(earliest_morning.time())
-            
-        if not afternoon_records.empty:
-            # Lấy thời gian sớm nhất trong buổi chiều
-            earliest_afternoon = afternoon_records['attendance_time'].min()
-            afternoon_times.append(earliest_afternoon.time())
-        
-        if morning_times and afternoon_times:
-            return 'FULL'  # Có cả sáng và chiều
-        elif morning_times:
-            return 'AM'    # Chỉ có sáng
-        elif afternoon_times:
-            return 'PM'    # Chỉ có chiều
+        if has_morning and has_afternoon:
+            return 'FULL'
+        elif has_morning:
+            return 'AM'
+        elif has_afternoon:
+            return 'PM'
         else:
             return 'NONE'
 
-    # Tính toán cho từng nhân viên
-
-    
+    # Tính toán cho từng nhân viên - tối ưu hóa bằng cách batch process
     for idx, emp in result.iterrows():
         emp_name = emp["Employee's name"]
+        target_name = extract_name_from_emp_name(emp_name)
+        
         normal_days = 0
         annual_leave = 0
         sick_leave = 0
         unpaid_leave = 0
         welfare_leave = 0
-
-        # Tính Normal working days và các loại leave
-        for dt in date_range:
-            day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
-            dt_date = dt.date()
-            
-            # Sửa logic: Tính cho ngày làm việc bình thường theo yêu cầu
-            # 1. Là ngày trong tuần (Thứ 2-6) VÀ không phải ngày nghỉ lễ
-            # 2. Là ngày cuối tuần nhưng được quy định là "ngày làm việc đặc biệt"
-            is_normal_workday = (
-                (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
-                (day_type == 'Weekend' and dt_date in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
-            )
-            
-            if is_normal_workday:
-                # Kiểm tra các điều kiện
-                has_ot = has_ot_on_date(emp_name, dt_date, ot_lieu_data)
-                has_lieu = is_lieu_day(emp_name, dt_date, ot_lieu_data)
-                has_apply_leave = has_apply_leave_on_date(emp_name, dt_date, apply_data)
-                
-                # Xác định ca làm việc
-                shift_info = get_shift_info(emp_name, dt_date, signinout_data)
-                
-    
-                
-                # Tính Normal working days
-                if not has_ot and not has_lieu and not has_apply_leave:
-                    if shift_info == 'FULL':
-                        normal_days += 1.0  # Cả ngày
-    
-                    elif shift_info == 'AM' or shift_info == 'PM':
-                        normal_days += 0.5  # Một ca
-
-
-        # Tính các loại leave từ apply_data
-        target_name = extract_name_from_emp_name(emp_name)
-        for record in apply_data:
-            if (record.get('Name', '').strip() == target_name and 
-                record.get('Type') == 'Leave' and 
-                record.get('Results') == 'Approved'):
-                
-                try:
-                    start_date_str = record.get('Start Date', '')
-                    end_date_str = record.get('End Date', '')
-                    apply_date_str = record.get('Apply Date', '')
-                    
-                    if start_date_str:
-                        start_date = pd.to_datetime(start_date_str).date()
-                    elif apply_date_str:
-                        start_date = pd.to_datetime(apply_date_str).date()
-                    else:
-                        continue
-                        
-                    end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
-                    
-                    # Duyệt qua từng ngày trong khoảng thời gian
-                    current_date = start_date
-                    while current_date <= end_date:
-                        if current_date in date_range:
-                            day_type = get_day_type(pd.to_datetime(current_date), holidays, special_weekends, special_workdays)
-                            if day_type == 'Weekday':
-                                leave_type = str(record.get('Leave Type', '')).lower()
-                                note = str(record.get('Note', '')).lower()
-                                
-                                # Xác định ca nghỉ từ Note
-                                if any(keyword in note for keyword in ['morning', 'sáng', '上午', 'am']):
-                                    leave_days = 0.5  # Nghỉ buổi sáng
-                                elif any(keyword in note for keyword in ['afternoon', 'chiều', '下午', 'pm']):
-                                    leave_days = 0.5  # Nghỉ buổi chiều
-                                elif start_date == end_date:
-                                    leave_days = 1.0  # Nghỉ cả ngày
-                                else:
-                                    leave_days = 1.0  # Nghỉ nhiều ngày, mỗi ngày = 1.0
-                                
-                                # Phân loại theo loại leave
-                                leave_type_lower = leave_type.lower()
-                                if 'annual' in leave_type_lower:
-                                    annual_leave += leave_days
-                                elif 'sick' in leave_type_lower:
-                                    sick_leave += leave_days
-                                elif 'unpaid' in leave_type_lower:
-                                    unpaid_leave += leave_days
-                                elif 'welfare' in leave_type_lower:
-                                    welfare_leave += leave_days
-                        
-                        current_date += timedelta(days=1)
-                except:
-                    continue
-
-        # Tính các cột violation từ signinout_data
         late_early_mins = 0
         late_early_times = 0
         forget_scanning = 0
         violation = 0
 
-        # Chuẩn bị DataFrame từ signinout_data
-        if signinout_data:
-            df_sign = pd.DataFrame(signinout_data)
-            # Đảm bảo các cột cần thiết
-            if 'Name' in df_sign.columns and 'attendance_time' in df_sign.columns:
-                df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-                df_sign['date'] = df_sign['attendance_time'].dt.date
-            else:
-                df_sign = pd.DataFrame(columns=['Name', 'attendance_time', 'date'])
-        else:
-            df_sign = pd.DataFrame(columns=['Name', 'attendance_time', 'date'])
-
+        # Get all working days for this period
+        workdays = []
         for dt in date_range:
             day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
-            # Chỉ tính violation cho ngày làm việc bình thường
+            dt_date = dt.date()
+            
             is_normal_workday = (
-                (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
-                (day_type == 'Weekend' and dt.date() in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
+                (day_type == 'Weekday') or
+                (day_type == 'Weekend' and dt_date in special_workdays)
             )
             
             if is_normal_workday:
-                # Lấy tất cả bản ghi của nhân viên này trong ngày dt
-                # Chuyển signinout_data từ list of dicts thành DataFrame
-                df_sign = pd.DataFrame(signinout_data)
-                if 'emp_name' in df_sign.columns and 'attendance_time' in df_sign.columns:
-                    df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-                    df_sign['date'] = df_sign['attendance_time'].dt.date
-                    mask = (df_sign['emp_name'].astype(str).str.strip() == target_name) & (df_sign['date'] == dt.date())
-                    day_records = df_sign[mask]
-                else:
-                    day_records = pd.DataFrame()
+                workdays.append((dt, dt_date))
 
-                if not day_records.empty:
-                    # Xử lý dữ liệu trùng lặp - lấy thời gian sớm nhất và muộn nhất
+        # Batch check all conditions for workdays
+        for dt, dt_date in workdays:
+            has_ot = has_ot_on_date(target_name, dt_date)
+            has_lieu = is_lieu_day(target_name, dt_date)
+            has_apply_leave = has_apply_leave_on_date(target_name, dt_date)
+            shift_info = get_shift_info(target_name, dt_date)
+            
+            # Calculate normal working days
+            if not has_ot and not has_lieu and not has_apply_leave:
+                if shift_info == 'FULL':
+                    normal_days += 1.0
+                elif shift_info in ['AM', 'PM']:
+                    normal_days += 0.5
+            
+            # Calculate violations for working days
+            if not df_sign_all.empty:
+                mask = (df_sign_all['target_name'] == target_name) & (df_sign_all['date'] == dt_date)
+                day_records = df_sign_all[mask]
+
+                if day_records.empty:
+                    forget_scanning += 1
+                else:
                     morning_records = day_records[day_records['attendance_time'].dt.hour < 12]
                     afternoon_records = day_records[day_records['attendance_time'].dt.hour >= 12]
                     
-                    in_time = None
-                    out_time = None
+                    in_time = morning_records['attendance_time'].min() if not morning_records.empty else None
+                    out_time = afternoon_records['attendance_time'].max() if not afternoon_records.empty else None
                     
-                    if not morning_records.empty:
-                        in_time = morning_records['attendance_time'].min()  # Thời gian sớm nhất buổi sáng
-                    
-                    if not afternoon_records.empty:
-                        out_time = afternoon_records['attendance_time'].max()  # Thời gian muộn nhất buổi chiều
-                    
-                    # Nếu không có dữ liệu sáng/chiều rõ ràng, lấy min/max của cả ngày
-                    if in_time is None and out_time is None:
-                        in_time = day_records['attendance_time'].min()
-                        out_time = day_records['attendance_time'].max()
-                    elif in_time is None:
-                        in_time = out_time
-                    elif out_time is None:
-                        out_time = in_time
-                    
-                    # Đi muộn
-                    if in_time.hour > 8 or (in_time.hour == 8 and in_time.minute > 30):
-                        late_minutes = (in_time.hour - 8) * 60 + (in_time.minute - 30)
-                        late_early_mins += late_minutes
-                        late_early_times += 1
-                    # Về sớm
-                    if out_time.hour < 17 or (out_time.hour == 17 and out_time.minute < 30):
-                        early_minutes = (17 - out_time.hour) * 60 + (30 - out_time.minute)
-                        late_early_mins += early_minutes
-                        late_early_times += 1
-                else:
-                    # Không có bản ghi nào trong ngày => quên quẹt
-                    forget_scanning += 1
+                    if pd.notna(in_time) and pd.notna(out_time):
+                        # Check late arrival
+                        if in_time.hour > 8 or (in_time.hour == 8 and in_time.minute > 30):
+                            late_minutes = (in_time.hour - 8) * 60 + (in_time.minute - 30)
+                            late_early_mins += late_minutes
+                            late_early_times += 1
+                        # Check early departure
+                        if out_time.hour < 17 or (out_time.hour == 17 and out_time.minute < 30):
+                            early_minutes = (17 - out_time.hour) * 60 + (30 - out_time.minute)
+                            late_early_mins += early_minutes
+                            late_early_times += 1
 
-        # Cập nhật kết quả
+        # Process leave applications more efficiently
+        records = apply_lookup.get(target_name, [])
+        for record in records:
+            try:
+                start_date_str = record.get('Start Date', '')
+                end_date_str = record.get('End Date', '')
+                apply_date_str = record.get('Apply Date', '')
+                
+                if start_date_str:
+                    start_date = pd.to_datetime(start_date_str).date()
+                elif apply_date_str:
+                    start_date = pd.to_datetime(apply_date_str).date()
+                else:
+                    continue
+                    
+                end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
+                
+                # Count leave days in date range
+                current_date = start_date
+                while current_date <= end_date:
+                    if any(d.date() == current_date for d in date_range):
+                        day_type = get_day_type(pd.to_datetime(current_date), holidays, special_weekends, special_workdays)
+                        if day_type == 'Weekday':
+                            leave_type = str(record.get('Leave Type', '')).lower()
+                            note = str(record.get('Note', '')).lower()
+                            
+                            # Determine leave duration
+                            if any(keyword in note for keyword in ['morning', 'sáng', '上午', 'am']):
+                                leave_days = 0.5
+                            elif any(keyword in note for keyword in ['afternoon', 'chiều', '下午', 'pm']):
+                                leave_days = 0.5
+                            elif start_date == end_date:
+                                leave_days = 1.0
+                            else:
+                                leave_days = 1.0
+                            
+                            # Categorize leave type
+                            if 'annual' in leave_type:
+                                annual_leave += leave_days
+                            elif 'sick' in leave_type:
+                                sick_leave += leave_days
+                            elif 'unpaid' in leave_type:
+                                unpaid_leave += leave_days
+                            elif 'welfare' in leave_type:
+                                welfare_leave += leave_days
+                    
+                    current_date += timedelta(days=1)
+            except:
+                continue
+
+        # Update result
         result.at[idx, 'Normal working days'] = normal_days
         result.at[idx, 'Annual leave (100% salary)'] = annual_leave
         result.at[idx, 'Sick leave (50% salary)'] = sick_leave
@@ -2288,17 +2129,12 @@ def get_total_attendance_detail():
         result.at[idx, 'Forget scanning'] = forget_scanning
         result.at[idx, 'Violation'] = violation
         
-
-        
-        # Tính Total
+        # Calculate totals
         total_leave = annual_leave + sick_leave + unpaid_leave + welfare_leave
         result.at[idx, 'Total'] = total_leave
-        
-        # Tính Attendance for salary payment (tổng ngày làm việc + nghỉ phép)
-        attendance_for_salary = normal_days + total_leave
-        result.at[idx, 'Attendance for salary payment'] = attendance_for_salary
+        result.at[idx, 'Attendance for salary payment'] = normal_days + total_leave
 
-    # Xác định lại thứ tự cột giống giao diện
+    # Reorder columns
     col_order = [
         'No',
         '14 Digits Employee ID',
@@ -2319,16 +2155,32 @@ def get_total_attendance_detail():
     ]
     result = result[[c for c in col_order if c in result.columns]]
 
-    # Chuyển dữ liệu về dạng list để trả ra frontend
     cols = list(result.columns)
     rows = result.fillna('').astype(str).values.tolist()
 
-    return jsonify({'columns': cols, 'data': rows})
+    result_data = {'columns': cols, 'data': rows}
+    
+    # Cache the result
+    _total_attendance_cache[cache_key] = (result_data, current_time)
+
+    return jsonify(result_data)
 
 @app.route('/get_attendance_report')
 def get_attendance_report():
+    global _attendance_report_cache
+    
+    # Create cache key based on file modification times
+    cache_key = f"attendance_report_{_get_cache_key()}"
+    current_time = datetime.now().timestamp()
+    
+    # Check if cached result is still valid
+    if cache_key in _attendance_report_cache:
+        cached_data, timestamp = _attendance_report_cache[cache_key]
+        if current_time - timestamp < _cache_timeout:
+            return jsonify(cached_data)
+    
     # Lấy dữ liệu từ các file tạm trước
-    signinout_data,apply_data,ot_lieu_data = [], [], []
+    signinout_data, apply_data, ot_lieu_data = [], [], []
     
     if os.path.exists(TEMP_SIGNINOUT_PATH):
         signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
@@ -2342,6 +2194,7 @@ def get_attendance_report():
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
         ot_lieu_data = otlieu_df.to_dict('records')
 
+    # Determine month and year from data
     month, year = 7, 2024
     if signinout_data:
         dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
@@ -2365,15 +2218,13 @@ def get_attendance_report():
     
     holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
     
+    # Helper functions - define before use
     def normalize_name(name_field):
         import re
         if not isinstance(name_field, str):
             return ""
-        # Xóa ID ở cuối nếu có (ví dụ: 10046198)
         name_only = re.sub(r'\d{8,}$', '', name_field).strip()
-        # Chuyển thành chữ thường và xóa khoảng trắng thừa
         return name_only.lower()
-
 
     def get_day_type(dt, holidays, special_weekends, special_workdays):
         dt_date = dt.date()
@@ -2386,123 +2237,141 @@ def get_attendance_report():
         if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
             return 'Weekend'
         return 'Weekday'
+    
+    # Optimize: Pre-process signin/out data once
+    df_sign_all = pd.DataFrame()
+    if signinout_data:
+        df_sign_all = pd.DataFrame(signinout_data)
+        if 'emp_name' in df_sign_all.columns and 'attendance_time' in df_sign_all.columns:
+            df_sign_all['attendance_time'] = pd.to_datetime(df_sign_all['attendance_time'], errors='coerce')
+            df_sign_all['Date'] = df_sign_all['attendance_time'].dt.date
+            df_sign_all['NormalizedName'] = df_sign_all['emp_name'].apply(normalize_name)
 
     def extract_name_from_emp_name(emp_name):
         import re
+        if not isinstance(emp_name, str):
+            return ""
         match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
         if match:
             return match.group(1).strip()
         return emp_name.strip()
 
-    def is_lieu_day(emp_name, check_date, ot_lieu_data):
-        # emp_name is already normalized
-        target_name = emp_name.lower().strip()
-        for record in ot_lieu_data:
+    # Pre-process apply data for faster lookup
+    apply_lookup = {}
+    for record in apply_data:
+        if record.get('Results') == 'Approved':
             name_val = str(record.get('Name', '') or '')
             normalized_name_val = normalize_name(name_val)
-            if normalized_name_val == target_name:
-                lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
-                for col in lieu_cols:
-                    if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                        try:
-                            lieu_date = pd.to_datetime(record[col]).date()
-                            if lieu_date == check_date:
-                                return True
-                        except:
-                            continue
+            if normalized_name_val not in apply_lookup:
+                apply_lookup[normalized_name_val] = []
+            apply_lookup[normalized_name_val].append(record)
+
+    # Pre-process OT/Lieu data for faster lookup
+    ot_lieu_lookup = {}
+    for record in ot_lieu_data:
+        name_val = str(record.get('Name', '') or '')
+        normalized_name_val = normalize_name(name_val)
+        if normalized_name_val not in ot_lieu_lookup:
+            ot_lieu_lookup[normalized_name_val] = []
+        ot_lieu_lookup[normalized_name_val].append(record)
+
+    # Optimized lookup functions
+    def is_lieu_day(normalized_name, check_date):
+        records = ot_lieu_lookup.get(normalized_name, [])
+        for record in records:
+            lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+            for col in lieu_cols:
+                if col in record and pd.notna(record[col]) and str(record[col]).strip():
+                    try:
+                        lieu_date = pd.to_datetime(record[col]).date()
+                        if lieu_date == check_date:
+                            return True
+                    except:
+                        continue
         return False
 
-    def get_apply_info_for_date(emp_name, check_date, apply_data):
-        """Trả về thông tin apply cho ngày: type, leave_type, is_approved"""
-        # emp_name is already normalized
-        target_name = emp_name.lower().strip()
-        for record in apply_data:
-            name_val = str(record.get('Name', '') or '')
-            normalized_name_val = normalize_name(name_val)
-            if (normalized_name_val == target_name and 
-                record.get('Results') == 'Approved'):
+    def get_apply_info_for_date(normalized_name, check_date):
+        records = apply_lookup.get(normalized_name, [])
+        for record in records:
+            try:
+                start_date_str = record.get('Start Date', '')
+                end_date_str = record.get('End Date', '')
+                apply_date_str = record.get('Apply Date', '')
                 
-                try:
-                    start_date_str = record.get('Start Date', '')
-                    end_date_str = record.get('End Date', '')
-                    apply_date_str = record.get('Apply Date', '')
-                    
-                    if start_date_str:
-                        start_date = pd.to_datetime(start_date_str).date()
-                    elif apply_date_str:
-                        start_date = pd.to_datetime(apply_date_str).date()
-                    else:
-                        continue
-                        
-                    end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
-                    
-                    if start_date <= check_date <= end_date:
-                        return {
-                            'type': record.get('Type', ''),
-                            'leave_type': record.get('Leave Type', ''),
-                            'is_approved': record.get('Results') == 'Approved'
-                        }
-                except:
+                if start_date_str:
+                    start_date = pd.to_datetime(start_date_str).date()
+                elif apply_date_str:
+                    start_date = pd.to_datetime(apply_date_str).date()
+                else:
                     continue
+                    
+                end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
+                
+                if start_date <= check_date <= end_date:
+                    return {
+                        'type': record.get('Type', ''),
+                        'leave_type': record.get('Leave Type', ''),
+                        'is_approved': record.get('Results') == 'Approved'
+                    }
+            except:
+                continue
         return None
 
-    # --- PHẦN 2: CHUẨN HÓA VÀ XÂY DỰNG BẢNG DỮ LIỆU GỐC ---
-
-    # Bước 1: Chuẩn hóa file danh sách nhân viên
+    # Prepare employee data with normalized names
     if os.path.exists(EMPLOYEE_LIST_PATH):
         emp_df = pd.read_csv(EMPLOYEE_LIST_PATH, dtype=str)
         emp_df.dropna(subset=['Name'], inplace=True)
         emp_df['NormalizedName'] = emp_df['Name'].apply(normalize_name)
-        # Giữ lại tên gốc để hiển thị
         emp_df['DisplayName'] = emp_df['Name'].apply(lambda x: re.sub(r'\d{8,}$', '', x).strip())
     else:
         return jsonify({'error': 'Không tìm thấy file danh sách nhân viên.'})
 
-    # Bước 2: Chuẩn hóa file chấm công
-    if not signinout_data:
-        return jsonify({'error': 'Không có dữ liệu chấm công.'})
+    # Pre-aggregate daily attendance data for faster lookup
+    if not df_sign_all.empty:
+        daily_times = df_sign_all.groupby(['NormalizedName', 'Date'])['attendance_time'].agg(
+            SignIn=('min'),
+            SignOut=('max')
+        ).reset_index()
+    else:
+        daily_times = pd.DataFrame(columns=['NormalizedName', 'Date', 'SignIn', 'SignOut'])
+
+    # Create master dataframe for all employee-day combinations
+    master_data = []
+    for _, emp_row in emp_df.iterrows():
+        for day in days:
+            day_date = day.date()
+            master_data.append({
+                'DisplayName': emp_row['DisplayName'],
+                'NormalizedName': emp_row['NormalizedName'],
+                'Dept': emp_row.get('Dept', ''),
+                'Date': day_date,
+                'DayPandas': day
+            })
     
-    df_sign = pd.DataFrame(signinout_data)
-    df_sign.dropna(subset=['attendance_time', 'emp_name'], inplace=True)
-    df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-    df_sign['Date'] = df_sign['attendance_time'].dt.date
-    df_sign['NormalizedName'] = df_sign['emp_name'].apply(normalize_name)
-
-    # Bước 3: Tổng hợp giờ vào/ra bằng tên đã chuẩn hóa
-    daily_times = df_sign.groupby(['NormalizedName', 'Date'])['attendance_time'].agg(
-        SignIn=('min'),
-        SignOut=('max')
-    ).reset_index()
-
-    # Bước 4: Tạo bảng master và hợp nhất bằng khóa chuẩn hóa
-    days = pd.date_range(start=(pd.Timestamp(year, month, 1) - pd.DateOffset(months=1)).replace(day=20), 
-                         end=pd.Timestamp(year, month, 19), freq='D')
+    master_df = pd.DataFrame(master_data)
     
-    master_df = pd.DataFrame([
-        (row['DisplayName'], row['NormalizedName'], day.date())
-        for _, row in emp_df.iterrows()
-        for day in days
-    ], columns=['DisplayName', 'NormalizedName', 'Date'])
-
-    master_df = pd.merge(master_df, emp_df[['NormalizedName', 'Dept']], on='NormalizedName', how='left')
+    # Merge with attendance data
     master_df = pd.merge(master_df, daily_times, on=['NormalizedName', 'Date'], how='left')
-
-    # (Chuẩn hóa các file khác nếu cần dùng, ví dụ Apply Data)
-    if apply_data:
-        apply_df = pd.DataFrame(apply_data)
-        apply_df['NormalizedName'] = apply_df['Emp Name'].apply(normalize_name)
 
     processed_records = []
     abnormal_report_data = []
 
+    # Process all records at once
     for _, row in master_df.iterrows():
-        record = row.to_dict()
-        emp_name, day_date = record['DisplayName'], record['Date']
-        day_pd_ts = pd.Timestamp(day_date)
+        emp_name, normalized_name, day_date, day_pd_ts = row['DisplayName'], row['NormalizedName'], row['Date'], row['DayPandas']
+
+        record = {
+            'DisplayName': emp_name,
+            'NormalizedName': normalized_name,
+            'Date': day_date,
+            'Dept': row['Dept']
+        }
 
         record['DayType'] = get_day_type(day_pd_ts, holidays, special_weekends, special_workdays)
-        record['IsLieu'] = is_lieu_day(record['NormalizedName'], day_date, ot_lieu_data)
-        record['ApplyInfo'] = get_apply_info_for_date(record['NormalizedName'], day_date, apply_data)
+        record['IsLieu'] = is_lieu_day(normalized_name, day_date)
+        record['ApplyInfo'] = get_apply_info_for_date(normalized_name, day_date)
+        record['SignIn'] = row.get('SignIn')
+        record['SignOut'] = row.get('SignOut')
         
         status, late_minutes = '', 0
 
@@ -2511,21 +2380,18 @@ def get_attendance_report():
         elif record['ApplyInfo'] and record['ApplyInfo']['is_approved']:
             apply_type = record['ApplyInfo']['type']
             if apply_type == 'Supplement':
-                # Nếu có đơn Supplement, kiểm tra chấm công
                 if pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
-                    status = 'Supplement'  # Không có chấm công, làm bổ sung
+                    status = 'Supplement'
                 elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
-                    status = 'Supplement'  # Thiếu chấm công, làm bổ sung
+                    status = 'Supplement'
                 else:
-                    # Có đầy đủ chấm công, xử lý theo logic bình thường
-                    status = 'Normal'  # Sẽ được xử lý tiếp ở phần else
+                    status = 'Normal'
             else:
-                # Các loại đơn khác (Trip, Leave)
                 status = apply_type
         elif pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
-            status = 'Miss' # Không có chấm công nào
+            status = 'Miss'
         elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
-            status = 'Miss' # Thiếu SignIn hoặc SignOut
+            status = 'Miss'
         else:
             status = 'Normal'
             check_in_time, check_out_time = record['SignIn'], record['SignOut']
@@ -2542,7 +2408,7 @@ def get_attendance_report():
                 
                 if work_hours < 8.0:
                     late_minutes = int((8.0 - work_hours) * 60)
-                    status = 'Late/Soon' 
+                    status = 'Late/Soon'
                     
                     abnormal_report_data.append({
                         'Department': record.get('Dept', ''), 'Name': emp_name, 'Date': day_date,
@@ -2552,12 +2418,11 @@ def get_attendance_report():
 
         record['Status'] = status
         record['LateMinutes'] = late_minutes
-        # Ensure we have the normalized name for later processing
-        record['NormalizedName'] = record.get('NormalizedName', '')
         processed_records.append(record)
 
-        processed_df = pd.DataFrame(processed_records)
+    processed_df = pd.DataFrame(processed_records)
 
+    # Build result table
     result_rows = []
     summary_keys = ['Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'Supplement', 'TotalLateMinutes']
 
@@ -2588,7 +2453,6 @@ def get_attendance_report():
                 elif status == 'Off':
                     morning_row[day_str], afternoon_row[day_str] = '', ''
                 elif status in ['Normal', 'Late/Soon']:
-                    # Trả về thời gian với prefix để frontend phân biệt
                     morning_time = pd.to_datetime(record['SignIn']).strftime('%H:%M') if pd.notna(record['SignIn']) else '0'
                     afternoon_time = pd.to_datetime(record['SignOut']).strftime('%H:%M') if pd.notna(record['SignOut']) else '0'
                     
@@ -2609,7 +2473,7 @@ def get_attendance_report():
         result_rows.append(afternoon_row)
 
     result = pd.DataFrame(result_rows)
-    columns = ['Department', 'Name', 'Shift'] + day_cols + list(summary.keys())
+    columns = ['Department', 'Name', 'Shift'] + day_cols + list(summary_keys)
     for col in columns:
         if col not in result.columns:
             result[col] = ''
@@ -2618,13 +2482,86 @@ def get_attendance_report():
     cols = list(result.columns)
     rows = result.fillna('').astype(str).values.tolist()
 
-    abnormal_cols = list(abnormal_report_data[0].keys()) if abnormal_report_data else []
-    abnormal_rows = [list(d.values()) for d in abnormal_report_data]
+    # Build abnormal data more efficiently
+    abnormal_late_early_data = []
+    abnormal_missing_data = []
 
-    return jsonify({
+    for _, emp_row in emp_df.iterrows():
+        emp_name = emp_row['DisplayName']
+        emp_name_normalized = emp_row['NormalizedName']
+        emp_data = processed_df[processed_df['NormalizedName'] == emp_name_normalized]
+
+        for day in days:
+            day_date = day.date()
+            day_type = get_day_type(day, holidays, special_weekends, special_workdays)
+            
+            if day_type == 'Weekday' or (day_type == 'Weekend' and day_date in special_workdays):
+                day_records = emp_data[emp_data['Date'] == day_date]
+
+                if day_records.empty:
+                    abnormal_missing_data.append({
+                        'Name': emp_name,
+                        'Date': day_date.strftime('%Y-%m-%d'),
+                        'Check in': '',
+                        'Check out': '',
+                        'Need apply on TMS': 'Need apply on TMS'
+                    })
+                else:
+                    record = day_records.iloc[0]
+                    check_in = record.get('SignIn')
+                    check_out = record.get('SignOut')
+
+                    if pd.isna(check_in) or pd.isna(check_out):
+                        abnormal_missing_data.append({
+                            'Name': emp_name,
+                            'Date': day_date.strftime('%Y-%m-%d'),
+                            'Check in': check_in.strftime('%H:%M') if pd.notna(check_in) else '',
+                            'Check out': check_out.strftime('%H:%M') if pd.notna(check_out) else '',
+                            'Need apply on TMS': 'Need apply on TMS'
+                        })
+                    else:
+                        late_mins = 0
+                        early_mins = 0
+                        status = []
+
+                        if check_in.hour > 8 or (check_in.hour == 8 and check_in.minute > 30):
+                            late_mins = (check_in.hour - 8) * 60 + check_in.minute - 30
+                            status.append('Late')
+
+                        if check_out.hour < 17 or (check_out.hour == 17 and check_out.minute < 30):
+                            early_mins = (17 - check_out.hour) * 60 + (30 - check_out.minute)
+                            status.append('Early')
+
+                        total_penalty_mins = late_mins + early_mins
+                        if total_penalty_mins > 0:
+                            abnormal_late_early_data.append({
+                                'Name': emp_name,
+                                'Attendance Date': day_date.strftime('%Y-%m-%d'),
+                                'morning card-swipe': check_in.strftime('%H:%M'),
+                                'afternoon card-swipe': check_out.strftime('%H:%M'),
+                                'status': ' & '.join(status),
+                                'Unpaid salary due to late come/early leave (mins)': total_penalty_mins
+                            })
+
+    # Convert abnormal data to columns and rows format
+    late_early_cols = ['Name', 'Attendance Date', 'morning card-swipe', 'afternoon card-swipe', 'status', 'Unpaid salary due to late come/early leave (mins)']
+    late_early_rows = [[d[col] for col in late_early_cols] for d in abnormal_late_early_data]
+
+    missing_cols = ['Name', 'Date', 'Check in', 'Check out', 'Need apply on TMS']
+    missing_rows = [[d[col] for col in missing_cols] for d in abnormal_missing_data]
+
+    result_data = {
         'columns': cols, 'rows': rows,
-        'abnormal_columns': abnormal_cols, 'abnormal_rows': abnormal_rows
-    })
+        'abnormal_late_early_columns': late_early_cols,
+        'abnormal_late_early_rows': late_early_rows,
+        'abnormal_missing_columns': missing_cols,
+        'abnormal_missing_rows': missing_rows
+    }
+    
+    # Cache the result
+    _attendance_report_cache[cache_key] = (result_data, current_time)
+    
+    return jsonify(result_data)
 
 def flatten_cell(cell):
     if isinstance(cell, dict) and 'value' in cell:
@@ -3090,6 +3027,8 @@ def calculate_total_attendance_detail_for_export():
         def extract_name_from_emp_name(emp_name):
             # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
             import re
+            if not isinstance(emp_name, str):
+                return ""
             match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
             if match:
                 return match.group(1).strip()
@@ -3327,462 +3266,637 @@ def calculate_total_attendance_detail_for_export():
         traceback.print_exc()
         return {'columns': [], 'rows': []}
 
-# ==========================
-# Styling Functions
-# ==========================
-def apply_employee_list_styling(worksheet):
-    """Apply styling to Employee List sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+def calculate_abnormal_late_early_for_export():
+    """Calculate Abnormal Late/Early data for export"""
+    global sign_in_out_data, apply_data, employee_list_df, rules
     
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Column widths
-    worksheet.column_dimensions['A'].width = 5   # STT
-    worksheet.column_dimensions['B'].width = 25  # Name
-    worksheet.column_dimensions['C'].width = 20  # ID Number
-    worksheet.column_dimensions['D'].width = 15  # Dept
-    worksheet.column_dimensions['E'].width = 12  # Internship
-    worksheet.column_dimensions['F'].width = 8   # Delete button
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
-
-def apply_rules_styling(worksheet):
-    """Apply styling to Rules sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
-
-def apply_signinout_styling(worksheet):
-    """Apply styling to Sign In-Out Data sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
-
-def apply_apply_styling(worksheet):
-    """Apply styling to Apply Data sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
-
-def apply_otlieu_styling(worksheet):
-    """Apply styling to OT Lieu Data sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="C5504B", end_color="C5504B", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # Apply styling to all cells including error/warning colors
-    for row_idx, row in enumerate(worksheet.iter_rows(), 1):
-        for col_idx, cell in enumerate(row, 1):
-            cell.border = thin_border
-            
-            # Apply error/warning styling based on cell content
-            if row_idx > 1:  # Skip header row
-                cell_value = str(cell.value) if cell.value else ""
-                
-                # Error cells (red background)
-                if "error" in cell_value.lower() or "invalid" in cell_value.lower():
-                    cell.fill = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
-                    cell.font = Font(color="D32F2F", bold=True)
-                
-                # Warning cells (yellow background)
-                elif "warning" in cell_value.lower() or "suggest" in cell_value.lower():
-                    cell.fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
-                    cell.font = Font(color="F57F17", bold=True)
-                
-                # Gray cells (inactive)
-                elif "gray" in cell_value.lower() or "inactive" in cell_value.lower():
-                    cell.fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
-                    cell.font = Font(color="757575")
-
-def apply_otlieu_before_styling(worksheet):
-    """Apply styling to OT Lieu Before sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="9C5700", end_color="9C5700", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
-
-def apply_otlieu_report_styling(worksheet):
-    """Apply styling to OT Lieu Report sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Apply header styling
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_alignment
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # Apply styling to all cells including highlight for "Total OT paid" > 25
-    for row_idx, row in enumerate(worksheet.iter_rows(), 1):
-        for col_idx, cell in enumerate(row, 1):
-            cell.border = thin_border
-            
-            # Highlight "Total OT paid" column when value > 25
-            if row_idx > 1:  # Skip header row
-                header_cell = worksheet.cell(row=1, column=col_idx)
-                if header_cell.value == "Total OT paid":
-                    try:
-                        ot_value = float(cell.value) if cell.value and str(cell.value) != '-' else 0
-                        if ot_value > 25:
-                            cell.fill = PatternFill(start_color="FFEBEE", end_color="FFEBEE", fill_type="solid")
-                            cell.font = Font(color="D32F2F", bold=True)
-                    except:
-                        pass
-
-def apply_total_attendance_styling(worksheet):
-    """Apply styling to Total Attendance Detail sheet"""
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # Header styling with different colors for column groups
-    header_font = Font(bold=True, color="FFFFFF")
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    
-    # Define column group colors
-    base_cols = ["No", "14 Digits Employee ID", "Employee's name", "Group"]
-    attendance_cols = [
-        "Normal working days", "Annual leave (100% salary)", "Sick leave (50% salary)",
-        "Unpaid leave (0% salary)", "Welfare leave (100% salary)", "Total"
-    ]
-    violation_cols = [
-        "Late/Leave early (mins)", "Late/Leave early (times)", "Forget scanning", "Violation"
-    ]
-    remain_cols = ["Remark", "Attendance for salary payment"]
-    
-    # Apply header styling with different colors
-    for col_idx, cell in enumerate(worksheet[1], 1):
-        cell.font = header_font
-        cell.alignment = header_alignment
+    try:
+        # Load data from temp files if global variables are empty
+        if sign_in_out_data is None or sign_in_out_data.empty:
+            temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
+            if os.path.exists(temp_signinout_path):
+                sign_in_out_data = pd.read_excel(temp_signinout_path)
+            else:
+                return pd.DataFrame()
         
-        # Determine column group and apply color
-        if cell.value in base_cols:
-            cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-        elif cell.value in attendance_cols:
-            cell.fill = PatternFill(start_color="E0F7FA", end_color="E0F7FA", fill_type="solid")
-            cell.font = Font(bold=True, color="000000")  # Black text for light background
-        elif cell.value in violation_cols:
-            cell.fill = PatternFill(start_color="FFEAEA", end_color="FFEAEA", fill_type="solid")
-            cell.font = Font(bold=True, color="000000")  # Black text for light background
-        elif cell.value in remain_cols:
-            cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-        else:
-            cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-    
-    # Auto-adjust column widths
-    for column in worksheet.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # Border styling
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    for row in worksheet.iter_rows():
-        for cell in row:
-            cell.border = thin_border
+        if employee_list_df is None or employee_list_df.empty:
+            emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
+            if os.path.exists(emp_path):
+                employee_list_df = pd.read_csv(emp_path, dtype=str)
+            else:
+                return pd.DataFrame()
 
-def apply_attendance_report_styling(worksheet):
-    """
-    Áp dụng màu sắc và định dạng cho sheet 'Attendance Report'.
-    Hàm này sẽ tự suy luận trạng thái từ giá trị của ô.
-    """
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    # --- STYLE ---
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="255E91", end_color="255E91", fill_type="solid")
-    name_body_alignment = Alignment(horizontal="left", vertical="center")
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
-    
-    # --- STYLE HEADER ---
-    for cell in worksheet[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-    
-    for col_idx, column in enumerate(worksheet.columns, 1):
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-            adjusted_width = min(max_length + 2, 50)
-        worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-    # --- LOGIC ---
-
-    # 'TotalLateMinutes'
-    late_minutes_col_idx = None
-    summary_start_col_idx = None
-    for col_idx, cell in enumerate(worksheet[1], 1):
-        if cell.value == 'TotalLateMinutes':
-            late_minutes_col_idx = col_idx
-        if cell.value == 'Normal': 
-             summary_start_col_idx = col_idx
-
-    for row_idx, row in enumerate(worksheet.iter_rows(min_row=2), 2):
-        has_late_soon_violation = False
-        if late_minutes_col_idx:
-            try:
-                minutes = float(worksheet.cell(row=row_idx, column=late_minutes_col_idx).value)
-                if minutes > 0:
-                    has_late_soon_violation = True
-            except (ValueError, TypeError):
-                pass
-
-        for cell in row:
-            cell.border = thin_border
+        # Create abnormal late/early data
+        late_early_data = []
+        
+        # Extract names from employee list for filtering
+        valid_names = set(employee_list_df['Name'].astype(str)) if not employee_list_df.empty else set()
+        
+        if not sign_in_out_data.empty and 'emp_name' in sign_in_out_data.columns and 'attendance_time' in sign_in_out_data.columns:
+            df_sign = sign_in_out_data.copy()
+            df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+            df_sign['date'] = df_sign['attendance_time'].dt.date
+            df_sign['time'] = df_sign['attendance_time'].dt.time
             
-            if summary_start_col_idx and cell.column >= summary_start_col_idx:
-                continue
+            # Group by employee and date
+            for name in valid_names:
+                emp_records = df_sign[df_sign['emp_name'].astype(str) == name]
+                for date, day_records in emp_records.groupby('date'):
+                    day_records = day_records.sort_values('attendance_time')
+                    if len(day_records) >= 2:
+                        first_time = day_records.iloc[0]['attendance_time']
+                        last_time = day_records.iloc[-1]['attendance_time']
+                        
+                        # Check if late (after 8:30 AM) or early (before 5:30 PM)
+                        first_hour = first_time.hour + first_time.minute / 60
+                        last_hour = last_time.hour + last_time.minute / 60
+                        
+                        late_minutes = 0
+                        early_minutes = 0
+                        status = "Normal"
+                        
+                        # Late check (after 8:30 AM = 8.5 hours)
+                        if first_hour > 8.5:
+                            late_minutes = int((first_hour - 8.5) * 60)
+                            status = "Late"
+                        
+                        # Early leave check (before 5:30 PM = 17.5 hours)
+                        if last_hour < 17.5:
+                            early_minutes = int((17.5 - last_hour) * 60)
+                            if status == "Late":
+                                status = "Late & Early"
+                            else:
+                                status = "Early"
+                        
+                        # Only add to abnormal if there are issues
+                        if late_minutes > 0 or early_minutes > 0:
+                            late_early_data.append({
+                                'Employee': name,
+                                'Date': date.strftime('%Y-%m-%d'),
+                                'SignIn': first_time.strftime('%H:%M'),
+                                'SignOut': last_time.strftime('%H:%M'),
+                                'Status': status,
+                                'LateMinutes': late_minutes,
+                                'EarlyMinutes': early_minutes,
+                                'TotalViolationMinutes': late_minutes + early_minutes
+                            })
+        
+        if not late_early_data:
+            return pd.DataFrame()
+        
+        return pd.DataFrame(late_early_data)
+        
+    except Exception as e:
+        print(f"Error in calculate_abnormal_late_early_for_export: {e}")
+        return pd.DataFrame()
 
-            cell_value = str(cell.value) if cell.value is not None else ""
+def calculate_abnormal_missing_for_export():
+    """Calculate Abnormal Missing data for export"""
+    global sign_in_out_data, apply_data, employee_list_df, rules
+    
+    try:
+        # Load data from temp files if global variables are empty
+        if sign_in_out_data is None or sign_in_out_data.empty:
+            temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
+            if os.path.exists(temp_signinout_path):
+                sign_in_out_data = pd.read_excel(temp_signinout_path)
+            else:
+                return pd.DataFrame()
+        
+        if employee_list_df is None or employee_list_df.empty:
+            emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
+            if os.path.exists(emp_path):
+                employee_list_df = pd.read_csv(emp_path, dtype=str)
+            else:
+                return pd.DataFrame()
 
-            if cell_value == 'Trip':
-                cell.fill = PatternFill(start_color="BBDEFB", fill_type="solid")
-            elif cell_value == 'Leave':
-                cell.fill = PatternFill(start_color="FFE0B2", fill_type="solid")
-            elif cell_value == 'Supplement':
-                cell.fill = PatternFill(start_color="C5CAE9", fill_type="solid")
-            elif cell_value == 'Lieu':
-                cell.fill = PatternFill(start_color="E1BEE7", fill_type="solid")
-            elif cell_value == '0' or cell_value.lower() == 'miss':
-                cell.fill = PatternFill(start_color="FFCDD2", fill_type="solid")  # Nền đỏ
-                cell.font = Font(color="D32F2F", bold=True)
-            elif ':' in cell_value:
-                if has_late_soon_violation:
-                    cell.fill = PatternFill(start_color="FFF9C4", fill_type="solid")  # Nền vàng
-                    cell.font = Font(color="D32F2F", bold=True)
-                else:
-                    cell.fill = PatternFill(start_color="C8E6C9", fill_type="solid")  # Nền xanh lá
-            elif cell_value == '': 
-                 cell.fill = PatternFill(start_color="E0E0E0", fill_type="solid")
+        if apply_data is None or apply_data.empty:
+            temp_apply_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
+            if os.path.exists(temp_apply_path):
+                apply_data = pd.read_excel(temp_apply_path)
+        
+        # Create abnormal missing data
+        missing_data = []
+        
+        # Extract names from employee list for filtering
+        valid_names = set(employee_list_df['Name'].astype(str)) if not employee_list_df.empty else set()
+        
+        # Get date range from sign-in/out data
+        if not sign_in_out_data.empty and 'attendance_time' in sign_in_out_data.columns:
+            df_sign = sign_in_out_data.copy()
+            df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
+            date_range = pd.date_range(
+                start=df_sign['attendance_time'].min().date(),
+                end=df_sign['attendance_time'].max().date(),
+                freq='D'
+            )
+            
+            # Check for missing attendance for each employee on each workday
+            for name in valid_names:
+                emp_records = df_sign[df_sign['emp_name'].astype(str) == name]
+                emp_dates = set(emp_records['attendance_time'].dt.date.dropna())
+                
+                for date in date_range:
+                    # Skip weekends (Saturday=5, Sunday=6)
+                    if date.weekday() >= 5:
+                        continue
+                        
+                    check_date = date.date()
+                    
+                    # Check if employee has attendance record for this date
+                    if check_date not in emp_dates:
+                        # Check if employee has approved leave for this date
+                        has_leave = False
+                        if apply_data is not None and not apply_data.empty:
+                            for _, leave_record in apply_data.iterrows():
+                                if (leave_record.get('Emp Name', '').strip() == name and 
+                                    leave_record.get('Results', '').strip() == 'Approved'):
+                                    try:
+                                        start_date = pd.to_datetime(leave_record.get('Start Date')).date()
+                                        end_date = pd.to_datetime(leave_record.get('End Date')).date()
+                                        if start_date <= check_date <= end_date:
+                                            has_leave = True
+                                            break
+                                    except:
+                                        continue
+                        
+                        # If no leave, this is missing attendance
+                        if not has_leave:
+                            missing_data.append({
+                                'Employee': name,
+                                'Date': check_date.strftime('%Y-%m-%d'),
+                                'SignIn': '',
+                                'SignOut': '',
+                                'Status': 'Missing',
+                                'Reason': 'No attendance record found',
+                                'HasLeave': 'No'
+                            })
+        
+        if not missing_data:
+            return pd.DataFrame()
+        
+        return pd.DataFrame(missing_data)
+        
+    except Exception as e:
+        print(f"Error in calculate_abnormal_missing_for_export: {e}")
+        return pd.DataFrame()
+
+# # ==========================
+# # Styling Functions
+# # ==========================
+# def apply_employee_list_styling(worksheet):
+#     """Apply styling to Employee List sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Column widths
+#     worksheet.column_dimensions['A'].width = 5   # STT
+#     worksheet.column_dimensions['B'].width = 25  # Name
+#     worksheet.column_dimensions['C'].width = 20  # ID Number
+#     worksheet.column_dimensions['D'].width = 15  # Dept
+#     worksheet.column_dimensions['E'].width = 12  # Internship
+#     worksheet.column_dimensions['F'].width = 8   # Delete button
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_rules_styling(worksheet):
+#     """Apply styling to Rules sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_signinout_styling(worksheet):
+#     """Apply styling to Sign In-Out Data sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_apply_styling(worksheet):
+#     """Apply styling to Apply Data sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_otlieu_styling(worksheet):
+#     """Apply styling to OT Lieu Data sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="C5504B", end_color="C5504B", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     # Apply styling to all cells including error/warning colors
+#     for row_idx, row in enumerate(worksheet.iter_rows(), 1):
+#         for col_idx, cell in enumerate(row, 1):
+#             cell.border = thin_border
+            
+#             # Apply error/warning styling based on cell content
+#             if row_idx > 1:  # Skip header row
+#                 cell_value = str(cell.value) if cell.value else ""
+                
+#                 # Error cells (red background)
+#                 if "error" in cell_value.lower() or "invalid" in cell_value.lower():
+#                     cell.fill = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
+#                     cell.font = Font(color="D32F2F", bold=True)
+                
+#                 # Warning cells (yellow background)
+#                 elif "warning" in cell_value.lower() or "suggest" in cell_value.lower():
+#                     cell.fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
+#                     cell.font = Font(color="F57F17", bold=True)
+                
+#                 # Gray cells (inactive)
+#                 elif "gray" in cell_value.lower() or "inactive" in cell_value.lower():
+#                     cell.fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
+#                     cell.font = Font(color="757575")
+
+# def apply_otlieu_before_styling(worksheet):
+#     """Apply styling to OT Lieu Before sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="9C5700", end_color="9C5700", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_otlieu_report_styling(worksheet):
+#     """Apply styling to OT Lieu Report sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Apply header styling
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = header_alignment
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     # Apply styling to all cells including highlight for "Total OT paid" > 25
+#     for row_idx, row in enumerate(worksheet.iter_rows(), 1):
+#         for col_idx, cell in enumerate(row, 1):
+#             cell.border = thin_border
+            
+#             # Highlight "Total OT paid" column when value > 25
+#             if row_idx > 1:  # Skip header row
+#                 header_cell = worksheet.cell(row=1, column=col_idx)
+#                 if header_cell.value == "Total OT paid":
+#                     try:
+#                         ot_value = float(cell.value) if cell.value and str(cell.value) != '-' else 0
+#                         if ot_value > 25:
+#                             cell.fill = PatternFill(start_color="FFEBEE", end_color="FFEBEE", fill_type="solid")
+#                             cell.font = Font(color="D32F2F", bold=True)
+#                     except:
+#                         pass
+
+# def apply_total_attendance_styling(worksheet):
+#     """Apply styling to Total Attendance Detail sheet"""
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # Header styling with different colors for column groups
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_alignment = Alignment(horizontal="center", vertical="center")
+    
+#     # Define column group colors
+#     base_cols = ["No", "14 Digits Employee ID", "Employee's name", "Group"]
+#     attendance_cols = [
+#         "Normal working days", "Annual leave (100% salary)", "Sick leave (50% salary)",
+#         "Unpaid leave (0% salary)", "Welfare leave (100% salary)", "Total"
+#     ]
+#     violation_cols = [
+#         "Late/Leave early (mins)", "Late/Leave early (times)", "Forget scanning", "Violation"
+#     ]
+#     remain_cols = ["Remark", "Attendance for salary payment"]
+    
+#     # Apply header styling with different colors
+#     for col_idx, cell in enumerate(worksheet[1], 1):
+#         cell.font = header_font
+#         cell.alignment = header_alignment
+        
+#         # Determine column group and apply color
+#         if cell.value in base_cols:
+#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
+#         elif cell.value in attendance_cols:
+#             cell.fill = PatternFill(start_color="E0F7FA", end_color="E0F7FA", fill_type="solid")
+#             cell.font = Font(bold=True, color="000000")  # Black text for light background
+#         elif cell.value in violation_cols:
+#             cell.fill = PatternFill(start_color="FFEAEA", end_color="FFEAEA", fill_type="solid")
+#             cell.font = Font(bold=True, color="000000")  # Black text for light background
+#         elif cell.value in remain_cols:
+#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
+#         else:
+#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
+    
+#     # Auto-adjust column widths
+#     for column in worksheet.columns:
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#         adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # Border styling
+#     thin_border = Border(
+#         left=Side(style='thin'),
+#         right=Side(style='thin'),
+#         top=Side(style='thin'),
+#         bottom=Side(style='thin')
+#     )
+    
+#     for row in worksheet.iter_rows():
+#         for cell in row:
+#             cell.border = thin_border
+
+# def apply_attendance_report_styling(worksheet):
+#     """
+#     Áp dụng màu sắc và định dạng cho sheet 'Attendance Report'.
+#     Hàm này sẽ tự suy luận trạng thái từ giá trị của ô.
+#     """
+#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+#     # --- STYLE ---
+#     header_font = Font(bold=True, color="FFFFFF")
+#     header_fill = PatternFill(start_color="255E91", end_color="255E91", fill_type="solid")
+#     name_body_alignment = Alignment(horizontal="left", vertical="center")
+#     thin_border = Border(
+#         left=Side(style='thin'), right=Side(style='thin'),
+#         top=Side(style='thin'), bottom=Side(style='thin')
+#     )
+    
+#     # --- STYLE HEADER ---
+#     for cell in worksheet[1]:
+#         cell.font = header_font
+#         cell.fill = header_fill
+#         cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+#     for col_idx, column in enumerate(worksheet.columns, 1):
+#         max_length = 0
+#         column_letter = column[0].column_letter
+#         for cell in column:
+#             try:
+#                 if len(str(cell.value)) > max_length:
+#                     max_length = len(str(cell.value))
+#             except:
+#                 pass
+#             adjusted_width = min(max_length + 2, 50)
+#         worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+#     # --- LOGIC ---
+
+#     # 'TotalLateMinutes'
+#     late_minutes_col_idx = None
+#     summary_start_col_idx = None
+#     for col_idx, cell in enumerate(worksheet[1], 1):
+#         if cell.value == 'TotalLateMinutes':
+#             late_minutes_col_idx = col_idx
+#         if cell.value == 'Normal': 
+#              summary_start_col_idx = col_idx
+
+#     for row_idx, row in enumerate(worksheet.iter_rows(min_row=2), 2):
+#         has_late_soon_violation = False
+#         if late_minutes_col_idx:
+#             try:
+#                 minutes = float(worksheet.cell(row=row_idx, column=late_minutes_col_idx).value)
+#                 if minutes > 0:
+#                     has_late_soon_violation = True
+#             except (ValueError, TypeError):
+#                 pass
+
+#         for cell in row:
+#             cell.border = thin_border
+            
+#             if summary_start_col_idx and cell.column >= summary_start_col_idx:
+#                 continue
+
+#             cell_value = str(cell.value) if cell.value is not None else ""
+
+#             if cell_value == 'Trip':
+#                 cell.fill = PatternFill(start_color="BBDEFB", fill_type="solid")
+#             elif cell_value == 'Leave':
+#                 cell.fill = PatternFill(start_color="FFE0B2", fill_type="solid")
+#             elif cell_value == 'Supplement':
+#                 cell.fill = PatternFill(start_color="C5CAE9", fill_type="solid")
+#             elif cell_value == 'Lieu':
+#                 cell.fill = PatternFill(start_color="E1BEE7", fill_type="solid")
+#             elif cell_value == '0' or cell_value.lower() == 'miss':
+#                 cell.fill = PatternFill(start_color="FFCDD2", fill_type="solid")  # Nền đỏ
+#                 cell.font = Font(color="D32F2F", bold=True)
+#             elif ':' in cell_value:
+#                 if has_late_soon_violation:
+#                     cell.fill = PatternFill(start_color="FFF9C4", fill_type="solid")  # Nền vàng
+#                     cell.font = Font(color="D32F2F", bold=True)
+#                 else:
+#                     cell.fill = PatternFill(start_color="C8E6C9", fill_type="solid")  # Nền xanh lá
+#             elif cell_value == '': 
+#                  cell.fill = PatternFill(start_color="E0E0E0", fill_type="solid")
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 
