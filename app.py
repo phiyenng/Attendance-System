@@ -1568,6 +1568,14 @@ def get_otlieu_before():
     df = calculate_otlieu_before()
     if df.empty:
         return jsonify({'columns': [], 'data': []})
+    
+    # Convert 0.0 values to empty strings for numeric columns
+    numeric_cols = [col for col in df.columns if any(x in col for x in ['OT Payment:', 'Change in lieu:', 'Lieu used', 'Lieu Remain'])]
+    
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: '' if pd.isna(x) or (isinstance(x, (int, float)) and x == 0.0) else x)
+    
     cols = list(df.columns)
     rows = df.fillna('').astype(str).values.tolist()
     return jsonify({'columns': cols, 'data': rows})
@@ -1705,6 +1713,20 @@ def get_otlieu_report():
         'Remain unused time off in lieu', 'Total OT paid'
     ]
     result = result[[c for c in col_order if c in result.columns]]
+    
+    # Convert 0.0 values to empty strings for numeric columns
+    numeric_cols = [
+        'OT weekday 150%', 'OT weekday night 200%', 'OT weekly holiday 200%',
+        'OT weekly holiday night 270%', 'OT public holiday 300%', 'OT public holiday night 390%',
+        'OT weekday 150% (lieu)', 'OT weekday night 200% (lieu)', 'OT weekly holiday 200% (lieu)',
+        'OT weekly holiday night 270% (lieu)', 'OT public holiday 300% (lieu)', 'OT public holiday night 390% (lieu)',
+        'Total used hours in month', 'Remain unused time off in lieu', 'Total OT paid'
+    ]
+    
+    for col in numeric_cols:
+        if col in result.columns:
+            result[col] = result[col].apply(lambda x: '' if pd.isna(x) or (isinstance(x, (int, float)) and x == 0.0) else x)
+    
     cols = list(result.columns)
     rows = result.fillna('').astype(str).values.tolist()
     return jsonify({'columns': cols, 'data': rows})
@@ -2067,6 +2089,18 @@ def get_total_attendance_detail():
         'Late/Leave early (mins)','Late/Leave early (times)','Forget scanning','Violation','Remark','Attendance for salary payment'
     ]
     result = result[[c for c in col_order if c in result.columns]]
+
+    # Convert 0.0 and 0 values to empty strings for numeric columns
+    numeric_cols = [
+        'Normal working days', 'Annual leave (100% salary)', 'Sick leave (50% salary)',
+        'Unpaid leave (0% salary)', 'Welfare leave (100% salary)', 'Total',
+        'Late/Leave early (mins)', 'Late/Leave early (times)', 'Forget scanning', 
+        'Violation', 'Attendance for salary payment'
+    ]
+    
+    for col in numeric_cols:
+        if col in result.columns:
+            result[col] = result[col].apply(lambda x: '' if pd.isna(x) or (isinstance(x, (int, float)) and x == 0.0) else x)
 
     cols = list(result.columns)
     rows = result.fillna('').astype(str).values.tolist()
@@ -3053,28 +3087,36 @@ def calculate_otlieu_report_for_export():
             # Lấy dữ liệu OT/Lieu nếu có - sử dụng EmployeeID để match
             emp_data = grouped[grouped['EmployeeID'] == emp_id_str]
             for col in ot_payment_cols + lieu_cols:
-                row[col] = round(float(emp_data[col].values[0]), 3) if not emp_data.empty and col in emp_data.columns else 0.0
+                value = round(float(emp_data[col].values[0]), 3) if not emp_data.empty and col in emp_data.columns else 0.0
+                row[col] = '' if value == 0.0 else value
 
             # Tổng hợp
-            total_ot_paid = sum([row[c] for c in ot_payment_cols])
-            total_used_hours = sum([row[c] for c in lieu_cols])
-            row['Total OT paid'] = round(total_ot_paid, 3)
-            row['Total used hours in month'] = round(total_used_hours, 3)
-            row['Remain unused time off in lieu'] = round(row['Lieu remain previous month'] - total_used_hours, 3)
+            total_ot_paid = sum([row[c] if row[c] != '' else 0.0 for c in ot_payment_cols])
+            total_used_hours = sum([row[c] if row[c] != '' else 0.0 for c in lieu_cols])
+            row['Total OT paid'] = '' if total_ot_paid == 0.0 else round(total_ot_paid, 3)
+            row['Total used hours in month'] = '' if total_used_hours == 0.0 else round(total_used_hours, 3)
+            
+            lieu_remain = round(row['Lieu remain previous month'] - total_used_hours, 3)
+            row['Remain unused time off in lieu'] = '' if lieu_remain == 0.0 else lieu_remain
+            
             # OVERTIME (For payment)
-            row['OVERTIME (For payment)'] = total_ot_paid
+            row['OVERTIME (For payment)'] = '' if total_ot_paid == 0.0 else total_ot_paid
             # OVERTIME (No pay, For later time in lieu)
-            row['OVERTIME (No pay, For later time in lieu)'] = 0.0  # Nếu có logic riêng, bổ sung ở đây
+            row['OVERTIME (No pay, For later time in lieu)'] = ''  # Default empty
             # Time off in lieu (hour)
-            row['Time off in lieu (hour)'] = total_used_hours
+            row['Time off in lieu (hour)'] = '' if total_used_hours == 0.0 else total_used_hours
             # Transferred to normal working hours
             if total_used_hours > 0 and total_ot_paid == 0:
                 row['Transferred to normal working hours'] = total_used_hours
             elif total_ot_paid > 25:
                 row['Transferred to normal working hours'] = round(total_ot_paid - 25, 3)
             else:
-                row['Transferred to normal working hours'] = 0.0
+                row['Transferred to normal working hours'] = ''
             row['Date'] = ''
+
+            # Handle lieu remain previous month display
+            if row['Lieu remain previous month'] == 0.0:
+                row['Lieu remain previous month'] = ''
 
             result_rows.append(row)
 
@@ -3492,122 +3534,45 @@ def calculate_total_attendance_detail_for_export(month=None, year=None, employee
         return {'columns': [], 'rows': []}
 
 def calculate_abnormal_late_early_for_export(month=None, year=None):
-    """Calculate Abnormal Late/Early data for export"""
-    global sign_in_out_data, apply_data, employee_list_df, rules
-    
+    """Calculate Abnormal Late/Early data for export - uses same logic as frontend"""
     try:
-        # Load data from temp files if global variables are empty
-        if sign_in_out_data is None or sign_in_out_data.empty:
-            temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
-            if os.path.exists(temp_signinout_path):
-                sign_in_out_data = pd.read_excel(temp_signinout_path)
-            else:
-                return pd.DataFrame()
-        
-        if employee_list_df is None or employee_list_df.empty:
-            emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
-            if os.path.exists(emp_path):
-                employee_list_df = pd.read_csv(emp_path, dtype=str)
-            else:
-                return pd.DataFrame()
-
-        # Determine month and year
-        if month and year:
-            target_month = month
-            target_year = year
-            print(f"calculate_abnormal_late_early_for_export: Using provided month/year: {month}/{year}")
-        else:
-            # Auto-detect from data using most common month (same logic as get_attendance_report)
-            target_month, target_year = 7, 2024  # Default fallback
-            if sign_in_out_data is not None and not sign_in_out_data.empty:
-                dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
-                if dates:
-                    month_counts = {}
-                    for date in dates:
-                        month_key = (date.month, date.year)
-                        month_counts[month_key] = month_counts.get(month_key, 0) + 1
-                    most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
-                    target_month, target_year = most_common_month
-            print(f"calculate_abnormal_late_early_for_export: Auto-detected month/year: {target_month}/{target_year}")
-
-        # Calculate date range: 19th of previous month to 20th of current month
-        if target_month == 1:
-            prev_month = 12
-            prev_year = target_year - 1
-        else:
-            prev_month = target_month - 1
-            prev_year = target_year
-        
-        start_date = pd.Timestamp(prev_year, prev_month, 19)
-        end_date = pd.Timestamp(target_year, target_month, 20)
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-
-        # Create abnormal late/early data
-        late_early_data = []
-        
-        # Extract names from employee list for filtering
-        valid_names = set(employee_list_df['Name'].astype(str)) if not employee_list_df.empty else set()
-        
-        # Convert date_range to date objects for comparison
-        valid_dates = set(d.date() for d in date_range)
-        
-        if not sign_in_out_data.empty and 'emp_name' in sign_in_out_data.columns and 'attendance_time' in sign_in_out_data.columns:
-            df_sign = sign_in_out_data.copy()
-            df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-            df_sign['date'] = df_sign['attendance_time'].dt.date
-            df_sign['time'] = df_sign['attendance_time'].dt.time
+        # Call get_attendance_report to get the same data as frontend
+        with app.test_request_context():
+            response = get_attendance_report()
             
-            # Group by employee and date
-            for name in valid_names:
-                emp_records = df_sign[df_sign['emp_name'].astype(str) == name]
-                for date, day_records in emp_records.groupby('date'):
-                    # Filter by date range
-                    if date not in valid_dates:
-                        continue
-                        
-                    day_records = day_records.sort_values('attendance_time')
-                    if len(day_records) >= 2:
-                        first_time = day_records.iloc[0]['attendance_time']
-                        last_time = day_records.iloc[-1]['attendance_time']
-                        
-                        # Check if late (after 8:30 AM) or early (before 5:30 PM)
-                        first_hour = first_time.hour + first_time.minute / 60
-                        last_hour = last_time.hour + last_time.minute / 60
-                        
-                        late_minutes = 0
-                        early_minutes = 0
-                        status = "Normal"
-                        
-                        # Late check (after 8:30 AM = 8.5 hours)
-                        if first_hour > 8.5:
-                            late_minutes = int((first_hour - 8.5) * 60)
-                            status = "Late"
-                        
-                        # Early leave check (before 5:30 PM = 17.5 hours)
-                        if last_hour < 17.5:
-                            early_minutes = int((17.5 - last_hour) * 60)
-                            if status == "Late":
-                                status = "Late & Early"
-                            else:
-                                status = "Early"
-                        
-                        # Only add to abnormal if there are issues
-                        if late_minutes > 0 or early_minutes > 0:
-                            late_early_data.append({
-                                'Employee': name,
-                                'Date': date.strftime('%Y-%m-%d'),
-                                'SignIn': first_time.strftime('%H:%M'),
-                                'SignOut': last_time.strftime('%H:%M'),
-                                'Status': status,
-                                'LateMinutes': late_minutes,
-                                'EarlyMinutes': early_minutes,
-                                'TotalViolationMinutes': late_minutes + early_minutes
-                            })
+        if response.status_code == 200:
+            data = response.get_json()
+            if data and 'abnormal_late_early_columns' in data and 'abnormal_late_early_rows' in data:
+                columns = data['abnormal_late_early_columns']
+                rows = data['abnormal_late_early_rows']
+                
+                if rows:
+                    # Convert to DataFrame
+                    df = pd.DataFrame(rows, columns=columns)
+                    
+                    # Rename columns to match expected export format
+                    column_mapping = {
+                        'Name': 'Employee',
+                        'Attendance Date': 'Date', 
+                        'morning card-swipe': 'SignIn',
+                        'afternoon card-swipe': 'SignOut',
+                        'status': 'Status',
+                        'Unpaid salary due to late come/early leave (mins)': 'TotalViolationMinutes'
+                    }
+                    
+                    # Apply column mapping
+                    for old_col, new_col in column_mapping.items():
+                        if old_col in df.columns:
+                            df = df.rename(columns={old_col: new_col})
+                    
+                    return df
         
-        if not late_early_data:
-            return pd.DataFrame()
+        # Return empty DataFrame if no data
+        return pd.DataFrame()
         
-        return pd.DataFrame(late_early_data)
+    except Exception as e:
+        print(f"Error in calculate_abnormal_late_early_for_export: {e}")
+        return pd.DataFrame()
         
     except Exception as e:
         print(f"Error in calculate_abnormal_late_early_for_export: {e}")
