@@ -1,0 +1,28 @@
+{
+  "name": "Attendance Management System",
+  "description": "A Flask-based attendance management system with Excel import/export capabilities",
+  "image": "heroku/python",
+  "repository": "https://github.com/phiyenng/Attendance-System",
+  "keywords": ["python", "flask", "attendance", "excel", "hr"],
+  "env": {
+    "SECRET_KEY": {
+      "description": "A secret key for verifying the integrity of signed cookies.",
+      "generator": "secret"
+    },
+    "FLASK_ENV": {
+      "description": "Flask environment",
+      "value": "production"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1
+    }
+  },
+  "addons": [],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
