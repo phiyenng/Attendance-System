@@ -2140,22 +2140,9 @@ def get_total_attendance_detail():
 
     # Reorder columns
     col_order = [
-        'No',
-        '14 Digits Employee ID',
-        "Employee's name",
-        'Group',
-        'Normal working days',
-        'Annual leave (100% salary)',
-        'Sick leave (50% salary)',
-        'Unpaid leave (0% salary)',
-        'Welfare leave (100% salary)',
-        'Total',
-        'Late/Leave early (mins)',
-        'Late/Leave early (times)',
-        'Forget scanning',
-        'Violation',
-        'Remark',
-        'Attendance for salary payment'
+        'No', '14 Digits Employee ID',"Employee's name",'Group','Normal working days','Annual leave (100% salary)',
+        'Sick leave (50% salary)','Unpaid leave (0% salary)','Welfare leave (100% salary)','Total',
+        'Late/Leave early (mins)','Late/Leave early (times)','Forget scanning','Violation','Remark','Attendance for salary payment'
     ]
     result = result[[c for c in col_order if c in result.columns]]
 
@@ -3101,27 +3088,17 @@ def calculate_total_attendance_detail_for_export(month=None, year=None, employee
             target_month = month
             target_year = year
         else:
-            # Auto-detect from data or use current month/year
+            # Auto-detect from data using most common month (same logic as get_attendance_report)
+            target_month, target_year = 7, 2024  # Default fallback
             if sign_in_out_data is not None and not sign_in_out_data.empty:
                 dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
                 if dates:
-                    # Use latest month as default
-                    latest_date = max(dates)
-                    if latest_date.day >= 19:
-                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
-                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
-                    else:
-                        target_month = latest_date.month
-                        target_year = latest_date.year
-                else:
-                    # Default to current month
-                    today = datetime.now()
-                    target_month = today.month
-                    target_year = today.year
-            else:
-                today = datetime.now()
-                target_month = today.month
-                target_year = today.year
+                    month_counts = {}
+                    for date in dates:
+                        month_key = (date.month, date.year)
+                        month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                    most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                    target_month, target_year = most_common_month
 
         # Calculate date range: 19th of previous month to 20th of current month
         if target_month == 1:
@@ -3452,28 +3429,20 @@ def calculate_abnormal_late_early_for_export(month=None, year=None):
         if month and year:
             target_month = month
             target_year = year
+            print(f"calculate_abnormal_late_early_for_export: Using provided month/year: {month}/{year}")
         else:
-            # Auto-detect from data
+            # Auto-detect from data using most common month (same logic as get_attendance_report)
+            target_month, target_year = 7, 2024  # Default fallback
             if sign_in_out_data is not None and not sign_in_out_data.empty:
                 dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
                 if dates:
-                    # Use latest month as default
-                    latest_date = max(dates)
-                    if latest_date.day >= 19:
-                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
-                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
-                    else:
-                        target_month = latest_date.month
-                        target_year = latest_date.year
-                else:
-                    # Default to current month
-                    today = datetime.now()
-                    target_month = today.month
-                    target_year = today.year
-            else:
-                today = datetime.now()
-                target_month = today.month
-                target_year = today.year
+                    month_counts = {}
+                    for date in dates:
+                        month_key = (date.month, date.year)
+                        month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                    most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                    target_month, target_year = most_common_month
+            print(f"calculate_abnormal_late_early_for_export: Auto-detected month/year: {target_month}/{target_year}")
 
         # Calculate date range: 19th of previous month to 20th of current month
         if target_month == 1:
@@ -3587,28 +3556,20 @@ def calculate_abnormal_missing_for_export(month=None, year=None):
         if month and year:
             target_month = month
             target_year = year
+            print(f"calculate_abnormal_missing_for_export: Using provided month/year: {month}/{year}")
         else:
-            # Auto-detect from data
+            # Auto-detect from data using most common month (same logic as get_attendance_report)
+            target_month, target_year = 7, 2024  # Default fallback
             if sign_in_out_data is not None and not sign_in_out_data.empty:
                 dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
                 if dates:
-                    # Use latest month as default
-                    latest_date = max(dates)
-                    if latest_date.day >= 19:
-                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
-                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
-                    else:
-                        target_month = latest_date.month
-                        target_year = latest_date.year
-                else:
-                    # Default to current month
-                    today = datetime.now()
-                    target_month = today.month
-                    target_year = today.year
-            else:
-                today = datetime.now()
-                target_month = today.month
-                target_year = today.year
+                    month_counts = {}
+                    for date in dates:
+                        month_key = (date.month, date.year)
+                        month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                    most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                    target_month, target_year = most_common_month
+            print(f"calculate_abnormal_missing_for_export: Auto-detected month/year: {target_month}/{target_year}")
 
         # Calculate date range: 19th of previous month to 20th of current month
         if target_month == 1:
