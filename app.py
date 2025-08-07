@@ -686,6 +686,10 @@ def export():
     global sign_in_out_data, apply_data, ot_lieu_data, employee_list_df, rules
 
     try:
+        # Get month/year parameters from request
+        selected_month = request.args.get('month', type=int)
+        selected_year = request.args.get('year', type=int)
+        
         # Đường dẫn template gốc
         template_path = os.path.join(app.config['UPLOAD_FOLDER'], 'AttendanceReport.xlsx')
         if not os.path.exists(template_path):
@@ -752,7 +756,7 @@ def export():
         # 8. Total Attendance Detail (calculated)
         if 'Total Attendance detail' in wb.sheetnames:
             try:
-                total_attendance_result = calculate_total_attendance_detail_for_export()
+                total_attendance_result = calculate_total_attendance_detail_for_export(selected_month, selected_year)
                 if isinstance(total_attendance_result, dict) and 'columns' in total_attendance_result and 'rows' in total_attendance_result:
                     total_attendance_df = pd.DataFrame(total_attendance_result['rows'], columns=total_attendance_result['columns'])
                     if not total_attendance_df.empty:
@@ -763,7 +767,7 @@ def export():
         # 9. Abnormal Late/Early Data
         if 'Abnormal LateCome-EarlyLeave' in wb.sheetnames:
             try:
-                abnormal_late_early_df = calculate_abnormal_late_early_for_export()
+                abnormal_late_early_df = calculate_abnormal_late_early_for_export(selected_month, selected_year)
                 if abnormal_late_early_df is not None and not abnormal_late_early_df.empty:
                     write_df_to_sheet(wb['Abnormal LateCome-EarlyLeave'], abnormal_late_early_df, start_row=2)
             except Exception as e:
@@ -772,7 +776,7 @@ def export():
         # 10. Abnormal Missing Data
         if 'Abnormal Missing' in wb.sheetnames:
             try:
-                abnormal_missing_df = calculate_abnormal_missing_for_export()
+                abnormal_missing_df = calculate_abnormal_missing_for_export(selected_month, selected_year)
                 if abnormal_missing_df is not None and not abnormal_missing_df.empty:
                     write_df_to_sheet(wb['Abnormal Missing'], abnormal_missing_df, start_row=2)
             except Exception as e:
@@ -1855,14 +1859,14 @@ def get_total_attendance_detail():
     # Lấy thông tin ngày đặc biệt từ rules
     holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
 
-    # Xác định khoảng thời gian tính toán (20 tháng trước đến 19 tháng này)
+    # Xác định khoảng thời gian tính toán (19 tháng trước đến 20 tháng này)
     today = datetime.now()
-    if today.day >= 20:
-        start_date = today.replace(day=20) - timedelta(days=30)
-        end_date = today.replace(day=19)
+    if today.day >= 19:
+        start_date = today.replace(day=19) - timedelta(days=30)
+        end_date = today.replace(day=20)
     else:
-        start_date = today.replace(day=20) - timedelta(days=60)
-        end_date = today.replace(day=19) - timedelta(days=30)
+        start_date = today.replace(day=19) - timedelta(days=60)
+        end_date = today.replace(day=20) - timedelta(days=30)
     
     date_range = pd.date_range(start=start_date, end=end_date, freq='D')
 
@@ -2169,8 +2173,12 @@ def get_total_attendance_detail():
 def get_attendance_report():
     global _attendance_report_cache
     
-    # Create cache key based on file modification times
-    cache_key = f"attendance_report_{_get_cache_key()}"
+    # Get month/year parameters from request
+    selected_month = request.args.get('month', type=int)
+    selected_year = request.args.get('year', type=int)
+    
+    # Create cache key including month/year parameters
+    cache_key = f"attendance_report_{_get_cache_key()}_{selected_month}_{selected_year}"
     current_time = datetime.now().timestamp()
     
     # Check if cached result is still valid
@@ -2194,25 +2202,40 @@ def get_attendance_report():
         otlieu_df = pd.read_excel(TEMP_OTLIEU_PATH)
         ot_lieu_data = otlieu_df.to_dict('records')
 
-    # Determine month and year from data
-    month, year = 7, 2024
-    if signinout_data:
-        dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
-        if dates:
-            month_counts = {}
-            for date in dates:
-                month_key = (date.month, date.year)
-                month_counts[month_key] = month_counts.get(month_key, 0) + 1
-            most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
-            month, year = most_common_month
+    # Determine month and year from parameters or auto-detect from data
+    if selected_month and selected_year:
+        # Use user-selected month/year
+        month, year = selected_month, selected_year
+        print(f"Using user-selected month/year: {month}/{year}")
+    else:
+        # Auto-detect from data (existing logic)
+        month, year = 7, 2024
+        if signinout_data:
+            dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
+            if dates:
+                month_counts = {}
+                for date in dates:
+                    month_key = (date.month, date.year)
+                    month_counts[month_key] = month_counts.get(month_key, 0) + 1
+                most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
+                month, year = most_common_month
+        print(f"Auto-detected month/year: {month}/{year}")
 
     # Load employee list
     emp_df = pd.read_csv(EMPLOYEE_LIST_PATH, dtype=str) if os.path.exists(EMPLOYEE_LIST_PATH) else pd.DataFrame(columns=["Dept", "Name"])
     if 'Dept' in emp_df.columns:
         emp_df = emp_df.sort_values(by=['Dept', 'Name']).reset_index(drop=True)
 
-    start_date = pd.Timestamp(year, month, 1) - pd.DateOffset(months=1, day=20)
-    end_date = pd.Timestamp(year, month, 19)
+    # Calculate date range: 19th of previous month to 20th of current month
+    if month == 1:
+        prev_month = 12
+        prev_year = year - 1
+    else:
+        prev_month = month - 1
+        prev_year = year
+    
+    start_date = pd.Timestamp(prev_year, prev_month, 19)
+    end_date = pd.Timestamp(year, month, 20)
     days = pd.date_range(start=start_date, end=end_date, freq='D')
     day_cols = [d.strftime('%Y-%m-%d') for d in days]
     
@@ -2555,13 +2578,81 @@ def get_attendance_report():
         'abnormal_late_early_columns': late_early_cols,
         'abnormal_late_early_rows': late_early_rows,
         'abnormal_missing_columns': missing_cols,
-        'abnormal_missing_rows': missing_rows
+        'abnormal_missing_rows': missing_rows,
+        'month': month,  # Add month/year to response
+        'year': year,
+        'period_start': start_date.strftime('%Y-%m-%d'),
+        'period_end': end_date.strftime('%Y-%m-%d')
     }
     
     # Cache the result
     _attendance_report_cache[cache_key] = (result_data, current_time)
     
     return jsonify(result_data)
+
+@app.route('/get_available_months')
+def get_available_months():
+    """Get list of available months from imported data - based on attendance report period logic"""
+    try:
+        # Load sign-in/out data to check available months
+        signinout_data = []
+        if os.path.exists(TEMP_SIGNINOUT_PATH):
+            signinout_df = pd.read_excel(TEMP_SIGNINOUT_PATH)
+            signinout_data = signinout_df.to_dict('records')
+        
+        available_months = []
+        
+        if signinout_data:
+            dates = [pd.to_datetime(r['attendance_time']) for r in signinout_data if pd.notna(r.get('attendance_time'))]
+            if dates:
+                # Map each date to its report month using attendance report logic
+                # Report month logic: from 19th of previous month to 20th of current month
+                report_month_counts = {}
+                
+                for date in dates:
+                    # Determine which report month this date belongs to
+                    if date.day >= 19:
+                        # If day >= 19, belongs to next month's report
+                        if date.month == 12:
+                            report_month = 1
+                            report_year = date.year + 1
+                        else:
+                            report_month = date.month + 1
+                            report_year = date.year
+                    else:
+                        # If day < 19, belongs to current month's report
+                        report_month = date.month
+                        report_year = date.year
+                    
+                    month_key = (report_month, report_year)
+                    report_month_counts[month_key] = report_month_counts.get(month_key, 0) + 1
+                
+                # Sort by year, then by month
+                sorted_months = sorted(report_month_counts.keys(), key=lambda x: (x[1], x[0]))
+                
+                for month, year in sorted_months:
+                    available_months.append({
+                        'month': month,
+                        'year': year,
+                        'display': f"{month:02d}/{year}",
+                        'record_count': report_month_counts[(month, year)]
+                    })
+        
+        return jsonify({
+            'success': True,
+            'available_months': available_months,
+            'current_month': datetime.now().month,
+            'current_year': datetime.now().year
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'available_months': [],
+            'current_month': datetime.now().month,
+            'current_year': datetime.now().year
+        })
 
 def flatten_cell(cell):
     if isinstance(cell, dict) and 'value' in cell:
@@ -2853,17 +2944,31 @@ def calculate_otlieu_report_for_export():
                         remain = 0.0
                     lieu_remain_map[name] = remain
 
-        # Chuẩn hóa tên nhân viên
-        df['Name'] = df['Name'].astype(str).str.strip()
+        # Chuẩn hóa tên nhân viên - Extract ID from names for matching
+        def extract_id_from_name(name_str):
+            """Extract employee ID from name string"""
+            import re
+            if not isinstance(name_str, str):
+                return ""
+            # Look for 8+ digit numbers in the name
+            match = re.search(r'(\d{8,})', name_str)
+            return match.group(1) if match else name_str.strip()
+        
+        # Create mapping between OT data names and employee list names using ID
+        df['EmployeeID'] = df['Name'].apply(extract_id_from_name)
         emp_list = employee_list_df.copy()
-        emp_list['Name'] = emp_list['Name'].astype(str).str.strip()
-
-        # Group theo nhân viên
-        grouped = df.groupby('Name')[ot_payment_cols + lieu_cols].sum().reset_index()
+        emp_list['EmployeeID'] = emp_list['Name'].apply(extract_id_from_name)
+        
+        # Create ID to employee list name mapping
+        id_to_emp_name = dict(zip(emp_list['EmployeeID'], emp_list['Name']))
+        
+        # Group theo employee ID thay vì Name
+        grouped = df.groupby('EmployeeID')[ot_payment_cols + lieu_cols].sum().reset_index()
 
         # Build kết quả cho tất cả nhân viên
         result_rows = []
         for _, emp in emp_list.iterrows():
+            emp_id_str = emp['EmployeeID']
             name = emp['Name']
             emp_id = emp.get('ID Number', '')
             row = {
@@ -2872,10 +2977,10 @@ def calculate_otlieu_report_for_export():
                 'Employee Name': name,
                 'Lieu remain previous month': round(lieu_remain_map.get(name, 0.0), 3),
             }
-            # Lấy dữ liệu OT/Lieu nếu có
-            emp_data = grouped[grouped['Name'] == name]
+            # Lấy dữ liệu OT/Lieu nếu có - sử dụng EmployeeID để match
+            emp_data = grouped[grouped['EmployeeID'] == emp_id_str]
             for col in ot_payment_cols + lieu_cols:
-                row[col] = round(float(emp_data[col].values[0]), 3) if not emp_data.empty and col in emp_data else 0.0
+                row[col] = round(float(emp_data[col].values[0]), 3) if not emp_data.empty and col in emp_data.columns else 0.0
 
             # Tổng hợp
             total_ot_paid = sum([row[c] for c in ot_payment_cols])
@@ -2950,11 +3055,11 @@ def calculate_otlieu_report_for_export():
         print(f"Error in calculate_otlieu_report_for_export: {e}")
         return {'columns': [], 'rows': []}
 
-def calculate_total_attendance_detail_for_export():
+def calculate_total_attendance_detail_for_export(month=None, year=None, employee_list_df=None, apply_data=None, ot_lieu_data=None, sign_in_out_data=None):
     """Calculate Total Attendance Detail data for export (without request context)"""
-    global sign_in_out_data, apply_data, ot_lieu_data, employee_list_df, rules
+    global rules
     
-    # Load data from temp files if global variables are empty
+    # Load data from temp files if not provided
     if sign_in_out_data is None or sign_in_out_data.empty:
         temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
         if os.path.exists(temp_signinout_path):
@@ -2991,21 +3096,43 @@ def calculate_total_attendance_detail_for_export():
             return {'columns': [], 'rows': []}
     
     try:
-        # Get current month/year
-        current_date = datetime.now()
-        month = current_date.month
-        year = current_date.year
-        
-        # Calculate date range: 20th of previous month to 19th of current month
-        if month == 1:
-            prev_month = 12
-            prev_year = year - 1
+        # Determine month and year
+        if month and year:
+            target_month = month
+            target_year = year
         else:
-            prev_month = month - 1
-            prev_year = year
+            # Auto-detect from data or use current month/year
+            if sign_in_out_data is not None and not sign_in_out_data.empty:
+                dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
+                if dates:
+                    # Use latest month as default
+                    latest_date = max(dates)
+                    if latest_date.day >= 19:
+                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
+                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
+                    else:
+                        target_month = latest_date.month
+                        target_year = latest_date.year
+                else:
+                    # Default to current month
+                    today = datetime.now()
+                    target_month = today.month
+                    target_year = today.year
+            else:
+                today = datetime.now()
+                target_month = today.month
+                target_year = today.year
+
+        # Calculate date range: 19th of previous month to 20th of current month
+        if target_month == 1:
+            prev_month = 12
+            prev_year = target_year - 1
+        else:
+            prev_month = target_month - 1
+            prev_year = target_year
         
-        start_date = pd.Timestamp(prev_year, prev_month, 20)
-        end_date = pd.Timestamp(year, month, 19)
+        start_date = pd.Timestamp(prev_year, prev_month, 19)
+        end_date = pd.Timestamp(target_year, target_month, 20)
         date_range = pd.date_range(start=start_date, end=end_date, freq='D')
         
         # Get special days from rules
@@ -3034,13 +3161,27 @@ def calculate_total_attendance_detail_for_export():
                 return match.group(1).strip()
             return emp_name.strip()
         
+        def extract_id_from_name(name_str):
+            """Extract employee ID from name string like 'Tran Minh Tri10349366'"""
+            import re
+            if not isinstance(name_str, str):
+                return None
+            # Look for 8+ digit number at the end of the string
+            match = re.search(r'(\d{8,})$', name_str.strip())
+            return match.group(1) if match else None
+        
         def is_lieu_day(emp_name, check_date, ot_lieu_data):
             if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
-            target_name = extract_name_from_emp_name(emp_name)
+            # Use ID-based matching
+            emp_id_from_name = extract_id_from_name(emp_name)
+            if not emp_id_from_name:
+                return False
+            
             for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == target_name:
+                record_id = extract_id_from_name(name_val)
+                if record_id == emp_id_from_name:
                     lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
                     for col in lieu_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3055,10 +3196,15 @@ def calculate_total_attendance_detail_for_export():
         def has_ot_on_date(emp_name, check_date, ot_lieu_data):
             if ot_lieu_data is None or ot_lieu_data.empty:
                 return False
-            target_name = extract_name_from_emp_name(emp_name)
+            # Use ID-based matching
+            emp_id_from_name = extract_id_from_name(emp_name)
+            if not emp_id_from_name:
+                return False
+                
             for _, record in ot_lieu_data.iterrows():
                 name_val = str(record.get('Name', '') or '')
-                if name_val.strip() == target_name:
+                record_id = extract_id_from_name(name_val)
+                if record_id == emp_id_from_name:
                     ot_date_cols = ['OT Date', 'Date', 'OT date']
                     for col in ot_date_cols:
                         if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -3073,9 +3219,16 @@ def calculate_total_attendance_detail_for_export():
         def has_apply_leave_on_date(emp_name, check_date, apply_data):
             if apply_data is None or apply_data.empty:
                 return False
-            target_name = extract_name_from_emp_name(emp_name)
+            # Use ID-based matching
+            emp_id_from_name = extract_id_from_name(emp_name)
+            if not emp_id_from_name:
+                return False
+                
             for _, record in apply_data.iterrows():
-                if (record.get('Name', '').strip() == target_name and 
+                name_val = str(record.get('Emp Name', '') or record.get('Name', ''))
+                record_id = extract_id_from_name(name_val)
+                
+                if (record_id == emp_id_from_name and 
                     record.get('Results') == 'Approved' and
                     record.get('Type') == 'Leave'):
                     
@@ -3103,9 +3256,14 @@ def calculate_total_attendance_detail_for_export():
             if sign_in_out_data is None or sign_in_out_data.empty:
                 return 'NONE'
             
-            target_name = extract_name_from_emp_name(emp_name)
+            # Use ID-based matching
+            emp_id_from_name = extract_id_from_name(emp_name)
+            if not emp_id_from_name:
+                return 'NONE'
+            
+            # Filter by ID-based matching
             day_records = sign_in_out_data[
-                (sign_in_out_data['emp_name'].astype(str).str.strip() == target_name) &
+                (sign_in_out_data['emp_name'].astype(str).apply(lambda x: extract_id_from_name(x)) == emp_id_from_name) &
                 (pd.to_datetime(sign_in_out_data['attendance_time'], errors='coerce').dt.date == check_date)
             ]
             
@@ -3174,12 +3332,16 @@ def calculate_total_attendance_detail_for_export():
             
             # Calculate leave days from apply data
             if apply_data is not None and not apply_data.empty:
-                target_name = extract_name_from_emp_name(emp_name)
-                emp_apply_data = apply_data[
-                    (apply_data['Emp Name'].astype(str).str.strip() == target_name) &
-                    (apply_data['Results'] == 'Approved') &
-                    (apply_data['Type'] == 'Leave')
-                ]
+                # Use ID-based matching for apply data
+                emp_id_from_name = extract_id_from_name(emp_name)
+                if emp_id_from_name:
+                    emp_apply_data = apply_data[
+                        (apply_data['Emp Name'].astype(str).apply(lambda x: extract_id_from_name(x)) == emp_id_from_name) &
+                        (apply_data['Results'] == 'Approved') &
+                        (apply_data['Type'] == 'Leave')
+                    ]
+                else:
+                    emp_apply_data = pd.DataFrame()  # Empty DataFrame if no ID found
                 
                 for _, apply_record in emp_apply_data.iterrows():
                     try:
@@ -3266,7 +3428,7 @@ def calculate_total_attendance_detail_for_export():
         traceback.print_exc()
         return {'columns': [], 'rows': []}
 
-def calculate_abnormal_late_early_for_export():
+def calculate_abnormal_late_early_for_export(month=None, year=None):
     """Calculate Abnormal Late/Early data for export"""
     global sign_in_out_data, apply_data, employee_list_df, rules
     
@@ -3286,11 +3448,53 @@ def calculate_abnormal_late_early_for_export():
             else:
                 return pd.DataFrame()
 
+        # Determine month and year
+        if month and year:
+            target_month = month
+            target_year = year
+        else:
+            # Auto-detect from data
+            if sign_in_out_data is not None and not sign_in_out_data.empty:
+                dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
+                if dates:
+                    # Use latest month as default
+                    latest_date = max(dates)
+                    if latest_date.day >= 19:
+                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
+                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
+                    else:
+                        target_month = latest_date.month
+                        target_year = latest_date.year
+                else:
+                    # Default to current month
+                    today = datetime.now()
+                    target_month = today.month
+                    target_year = today.year
+            else:
+                today = datetime.now()
+                target_month = today.month
+                target_year = today.year
+
+        # Calculate date range: 19th of previous month to 20th of current month
+        if target_month == 1:
+            prev_month = 12
+            prev_year = target_year - 1
+        else:
+            prev_month = target_month - 1
+            prev_year = target_year
+        
+        start_date = pd.Timestamp(prev_year, prev_month, 19)
+        end_date = pd.Timestamp(target_year, target_month, 20)
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+
         # Create abnormal late/early data
         late_early_data = []
         
         # Extract names from employee list for filtering
         valid_names = set(employee_list_df['Name'].astype(str)) if not employee_list_df.empty else set()
+        
+        # Convert date_range to date objects for comparison
+        valid_dates = set(d.date() for d in date_range)
         
         if not sign_in_out_data.empty and 'emp_name' in sign_in_out_data.columns and 'attendance_time' in sign_in_out_data.columns:
             df_sign = sign_in_out_data.copy()
@@ -3302,6 +3506,10 @@ def calculate_abnormal_late_early_for_export():
             for name in valid_names:
                 emp_records = df_sign[df_sign['emp_name'].astype(str) == name]
                 for date, day_records in emp_records.groupby('date'):
+                    # Filter by date range
+                    if date not in valid_dates:
+                        continue
+                        
                     day_records = day_records.sort_values('attendance_time')
                     if len(day_records) >= 2:
                         first_time = day_records.iloc[0]['attendance_time']
@@ -3350,7 +3558,7 @@ def calculate_abnormal_late_early_for_export():
         print(f"Error in calculate_abnormal_late_early_for_export: {e}")
         return pd.DataFrame()
 
-def calculate_abnormal_missing_for_export():
+def calculate_abnormal_missing_for_export(month=None, year=None):
     """Calculate Abnormal Missing data for export"""
     global sign_in_out_data, apply_data, employee_list_df, rules
     
@@ -3374,6 +3582,45 @@ def calculate_abnormal_missing_for_export():
             temp_apply_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
             if os.path.exists(temp_apply_path):
                 apply_data = pd.read_excel(temp_apply_path)
+
+        # Determine month and year
+        if month and year:
+            target_month = month
+            target_year = year
+        else:
+            # Auto-detect from data
+            if sign_in_out_data is not None and not sign_in_out_data.empty:
+                dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
+                if dates:
+                    # Use latest month as default
+                    latest_date = max(dates)
+                    if latest_date.day >= 19:
+                        target_month = latest_date.month + 1 if latest_date.month < 12 else 1
+                        target_year = latest_date.year if latest_date.month < 12 else latest_date.year + 1
+                    else:
+                        target_month = latest_date.month
+                        target_year = latest_date.year
+                else:
+                    # Default to current month
+                    today = datetime.now()
+                    target_month = today.month
+                    target_year = today.year
+            else:
+                today = datetime.now()
+                target_month = today.month
+                target_year = today.year
+
+        # Calculate date range: 19th of previous month to 20th of current month
+        if target_month == 1:
+            prev_month = 12
+            prev_year = target_year - 1
+        else:
+            prev_month = target_month - 1
+            prev_year = target_year
+        
+        start_date = pd.Timestamp(prev_year, prev_month, 19)
+        end_date = pd.Timestamp(target_year, target_month, 20)
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
         
         # Create abnormal missing data
         missing_data = []
@@ -3381,23 +3628,22 @@ def calculate_abnormal_missing_for_export():
         # Extract names from employee list for filtering
         valid_names = set(employee_list_df['Name'].astype(str)) if not employee_list_df.empty else set()
         
-        # Get date range from sign-in/out data
+        # Convert date_range to date objects for comparison
+        valid_dates = set(d.date() for d in date_range)
+        
+        # Get sign-in/out data for processing
         if not sign_in_out_data.empty and 'attendance_time' in sign_in_out_data.columns:
             df_sign = sign_in_out_data.copy()
             df_sign['attendance_time'] = pd.to_datetime(df_sign['attendance_time'], errors='coerce')
-            date_range = pd.date_range(
-                start=df_sign['attendance_time'].min().date(),
-                end=df_sign['attendance_time'].max().date(),
-                freq='D'
-            )
+            df_sign['date'] = df_sign['attendance_time'].dt.date
             
             # Check for missing attendance for each employee on each workday
             for name in valid_names:
                 emp_records = df_sign[df_sign['emp_name'].astype(str) == name]
-                emp_dates = set(emp_records['attendance_time'].dt.date.dropna())
+                emp_dates = set(emp_records['date'].dropna())
                 
                 for date in date_range:
-                    # Skip weekends (Saturday=5, Sunday=6)
+                    # Skip weekends (Saturday=5, Sunday=6) unless it's a special workday
                     if date.weekday() >= 5:
                         continue
                         
@@ -3440,463 +3686,6 @@ def calculate_abnormal_missing_for_export():
     except Exception as e:
         print(f"Error in calculate_abnormal_missing_for_export: {e}")
         return pd.DataFrame()
-
-# # ==========================
-# # Styling Functions
-# # ==========================
-# def apply_employee_list_styling(worksheet):
-#     """Apply styling to Employee List sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Column widths
-#     worksheet.column_dimensions['A'].width = 5   # STT
-#     worksheet.column_dimensions['B'].width = 25  # Name
-#     worksheet.column_dimensions['C'].width = 20  # ID Number
-#     worksheet.column_dimensions['D'].width = 15  # Dept
-#     worksheet.column_dimensions['E'].width = 12  # Internship
-#     worksheet.column_dimensions['F'].width = 8   # Delete button
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_rules_styling(worksheet):
-#     """Apply styling to Rules sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_signinout_styling(worksheet):
-#     """Apply styling to Sign In-Out Data sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_apply_styling(worksheet):
-#     """Apply styling to Apply Data sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_otlieu_styling(worksheet):
-#     """Apply styling to OT Lieu Data sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="C5504B", end_color="C5504B", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     # Apply styling to all cells including error/warning colors
-#     for row_idx, row in enumerate(worksheet.iter_rows(), 1):
-#         for col_idx, cell in enumerate(row, 1):
-#             cell.border = thin_border
-            
-#             # Apply error/warning styling based on cell content
-#             if row_idx > 1:  # Skip header row
-#                 cell_value = str(cell.value) if cell.value else ""
-                
-#                 # Error cells (red background)
-#                 if "error" in cell_value.lower() or "invalid" in cell_value.lower():
-#                     cell.fill = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
-#                     cell.font = Font(color="D32F2F", bold=True)
-                
-#                 # Warning cells (yellow background)
-#                 elif "warning" in cell_value.lower() or "suggest" in cell_value.lower():
-#                     cell.fill = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")
-#                     cell.font = Font(color="F57F17", bold=True)
-                
-#                 # Gray cells (inactive)
-#                 elif "gray" in cell_value.lower() or "inactive" in cell_value.lower():
-#                     cell.fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
-#                     cell.font = Font(color="757575")
-
-# def apply_otlieu_before_styling(worksheet):
-#     """Apply styling to OT Lieu Before sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="9C5700", end_color="9C5700", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_otlieu_report_styling(worksheet):
-#     """Apply styling to OT Lieu Report sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Apply header styling
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = header_alignment
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     # Apply styling to all cells including highlight for "Total OT paid" > 25
-#     for row_idx, row in enumerate(worksheet.iter_rows(), 1):
-#         for col_idx, cell in enumerate(row, 1):
-#             cell.border = thin_border
-            
-#             # Highlight "Total OT paid" column when value > 25
-#             if row_idx > 1:  # Skip header row
-#                 header_cell = worksheet.cell(row=1, column=col_idx)
-#                 if header_cell.value == "Total OT paid":
-#                     try:
-#                         ot_value = float(cell.value) if cell.value and str(cell.value) != '-' else 0
-#                         if ot_value > 25:
-#                             cell.fill = PatternFill(start_color="FFEBEE", end_color="FFEBEE", fill_type="solid")
-#                             cell.font = Font(color="D32F2F", bold=True)
-#                     except:
-#                         pass
-
-# def apply_total_attendance_styling(worksheet):
-#     """Apply styling to Total Attendance Detail sheet"""
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # Header styling with different colors for column groups
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_alignment = Alignment(horizontal="center", vertical="center")
-    
-#     # Define column group colors
-#     base_cols = ["No", "14 Digits Employee ID", "Employee's name", "Group"]
-#     attendance_cols = [
-#         "Normal working days", "Annual leave (100% salary)", "Sick leave (50% salary)",
-#         "Unpaid leave (0% salary)", "Welfare leave (100% salary)", "Total"
-#     ]
-#     violation_cols = [
-#         "Late/Leave early (mins)", "Late/Leave early (times)", "Forget scanning", "Violation"
-#     ]
-#     remain_cols = ["Remark", "Attendance for salary payment"]
-    
-#     # Apply header styling with different colors
-#     for col_idx, cell in enumerate(worksheet[1], 1):
-#         cell.font = header_font
-#         cell.alignment = header_alignment
-        
-#         # Determine column group and apply color
-#         if cell.value in base_cols:
-#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-#         elif cell.value in attendance_cols:
-#             cell.fill = PatternFill(start_color="E0F7FA", end_color="E0F7FA", fill_type="solid")
-#             cell.font = Font(bold=True, color="000000")  # Black text for light background
-#         elif cell.value in violation_cols:
-#             cell.fill = PatternFill(start_color="FFEAEA", end_color="FFEAEA", fill_type="solid")
-#             cell.font = Font(bold=True, color="000000")  # Black text for light background
-#         elif cell.value in remain_cols:
-#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-#         else:
-#             cell.fill = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
-    
-#     # Auto-adjust column widths
-#     for column in worksheet.columns:
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#         adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # Border styling
-#     thin_border = Border(
-#         left=Side(style='thin'),
-#         right=Side(style='thin'),
-#         top=Side(style='thin'),
-#         bottom=Side(style='thin')
-#     )
-    
-#     for row in worksheet.iter_rows():
-#         for cell in row:
-#             cell.border = thin_border
-
-# def apply_attendance_report_styling(worksheet):
-#     """
-#     Áp dụng màu sắc và định dạng cho sheet 'Attendance Report'.
-#     Hàm này sẽ tự suy luận trạng thái từ giá trị của ô.
-#     """
-#     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-#     # --- STYLE ---
-#     header_font = Font(bold=True, color="FFFFFF")
-#     header_fill = PatternFill(start_color="255E91", end_color="255E91", fill_type="solid")
-#     name_body_alignment = Alignment(horizontal="left", vertical="center")
-#     thin_border = Border(
-#         left=Side(style='thin'), right=Side(style='thin'),
-#         top=Side(style='thin'), bottom=Side(style='thin')
-#     )
-    
-#     # --- STYLE HEADER ---
-#     for cell in worksheet[1]:
-#         cell.font = header_font
-#         cell.fill = header_fill
-#         cell.alignment = Alignment(horizontal="center", vertical="center")
-    
-#     for col_idx, column in enumerate(worksheet.columns, 1):
-#         max_length = 0
-#         column_letter = column[0].column_letter
-#         for cell in column:
-#             try:
-#                 if len(str(cell.value)) > max_length:
-#                     max_length = len(str(cell.value))
-#             except:
-#                 pass
-#             adjusted_width = min(max_length + 2, 50)
-#         worksheet.column_dimensions[column_letter].width = adjusted_width
-    
-#     # --- LOGIC ---
-
-#     # 'TotalLateMinutes'
-#     late_minutes_col_idx = None
-#     summary_start_col_idx = None
-#     for col_idx, cell in enumerate(worksheet[1], 1):
-#         if cell.value == 'TotalLateMinutes':
-#             late_minutes_col_idx = col_idx
-#         if cell.value == 'Normal': 
-#              summary_start_col_idx = col_idx
-
-#     for row_idx, row in enumerate(worksheet.iter_rows(min_row=2), 2):
-#         has_late_soon_violation = False
-#         if late_minutes_col_idx:
-#             try:
-#                 minutes = float(worksheet.cell(row=row_idx, column=late_minutes_col_idx).value)
-#                 if minutes > 0:
-#                     has_late_soon_violation = True
-#             except (ValueError, TypeError):
-#                 pass
-
-#         for cell in row:
-#             cell.border = thin_border
-            
-#             if summary_start_col_idx and cell.column >= summary_start_col_idx:
-#                 continue
-
-#             cell_value = str(cell.value) if cell.value is not None else ""
-
-#             if cell_value == 'Trip':
-#                 cell.fill = PatternFill(start_color="BBDEFB", fill_type="solid")
-#             elif cell_value == 'Leave':
-#                 cell.fill = PatternFill(start_color="FFE0B2", fill_type="solid")
-#             elif cell_value == 'Supplement':
-#                 cell.fill = PatternFill(start_color="C5CAE9", fill_type="solid")
-#             elif cell_value == 'Lieu':
-#                 cell.fill = PatternFill(start_color="E1BEE7", fill_type="solid")
-#             elif cell_value == '0' or cell_value.lower() == 'miss':
-#                 cell.fill = PatternFill(start_color="FFCDD2", fill_type="solid")  # Nền đỏ
-#                 cell.font = Font(color="D32F2F", bold=True)
-#             elif ':' in cell_value:
-#                 if has_late_soon_violation:
-#                     cell.fill = PatternFill(start_color="FFF9C4", fill_type="solid")  # Nền vàng
-#                     cell.font = Font(color="D32F2F", bold=True)
-#                 else:
-#                     cell.fill = PatternFill(start_color="C8E6C9", fill_type="solid")  # Nền xanh lá
-#             elif cell_value == '': 
-#                  cell.fill = PatternFill(start_color="E0E0E0", fill_type="solid")
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000) 

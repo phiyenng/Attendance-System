@@ -827,9 +827,13 @@
                 <!-- Dropdown chọn tháng/năm cho Attendance Report -->
                 <div id="attendanceMonthYearContainer" style="display:none; justify-content:center; align-items:center; gap:10px; margin-top:10px;">
                     <label for="attendanceMonth" class="form-label mb-0">Month:</label>
-                    <select id="attendanceMonth" class="form-select form-select-sm" style="width:80px;"></select>
+                    <select id="attendanceMonth" class="form-select form-select-sm" style="width:120px;"></select>
                     <label for="attendanceYear" class="form-label mb-0">Year:</label>
                     <select id="attendanceYear" class="form-select form-select-sm" style="width:90px;"></select>
+                </div>
+                <!-- Available data information - separate from dropdown -->
+                <div id="availableDataInfo" style="display:none; margin-top:8px; text-align:center;">
+                    <div id="availableMonthsInfo" style="font-size:0.5em; color:#666; line-height:1.2; font-style:italic;"></div>
                 </div>
             </div>
             <div id="alertContainer"></div>
@@ -989,7 +993,7 @@
                     <div class="mt-2">
                         <small class="text-muted">
                             <i class="fas fa-info-circle"></i> 
-                            Default range: 20th of previous month to 19th of current month
+                            Default range: 19th of previous month to 20th of current month
                         </small>
                         <div id="dateRangeStatus" class="mt-1" style="display:none;">
                             <small class="text-info">
@@ -1879,9 +1883,11 @@
             // Show/hide month/year dropdown
             if(sectionId==='reportSection') {
                 document.getElementById('attendanceMonthYearContainer').style.display = 'flex';
+                document.getElementById('availableDataInfo').style.display = 'block';
                 // Không cần gọi showReportLoading ở đây vì đã được gọi trong onclick của navReport
             } else {
                 document.getElementById('attendanceMonthYearContainer').style.display = 'none';
+                document.getElementById('availableDataInfo').style.display = 'none';
             }
             // Special: reload employee list if needed
             if(sectionId==='employeeListSection') {
@@ -3743,194 +3749,195 @@
 
         // Attendance Report Tab Logic
         function loadAttendanceReportTab() {
+            // Load available months first, then initialize dropdowns
+            loadAvailableMonths();
+        }
+
+        function loadAvailableMonths() {
+            fetch('/get_available_months')
+                .then(res => res.json())
+                .then(data => {
+                    console.log('Available months:', data);
+                    initializeMonthYearDropdowns(data);
+                    loadAttendanceReportTable();
+                })
+                .catch(error => {
+                    console.error('Error loading available months:', error);
+                    // Fallback to default initialization
+                    initializeMonthYearDropdowns({
+                        available_months: [],
+                        current_month: new Date().getMonth() + 1,
+                        current_year: new Date().getFullYear()
+                    });
+                    loadAttendanceReportTable();
+                });
+        }
+
+        function initializeMonthYearDropdowns(data) {
             const monthSel = document.getElementById('attendanceMonth');
             const yearSel = document.getElementById('attendanceYear');
+            
             if (monthSel && monthSel.options.length === 0) {
+                // Clear existing options
+                monthSel.innerHTML = '';
+                yearSel.innerHTML = '';
+                
+                // Get unique years from available data
+                const availableYears = [...new Set(data.available_months.map(m => m.year))];
+                const currentYear = new Date().getFullYear();
+                
+                // Add year options (available years + current year range)
+                const yearRange = new Set([...availableYears, currentYear - 1, currentYear, currentYear + 1]);
+                const sortedYears = [...yearRange].sort((a, b) => a - b);
+                
+                for (let year of sortedYears) {
+                    yearSel.innerHTML += `<option value="${year}">${year}</option>`;
+                }
+                
+                // Add month options (always 1-12)
                 for (let m = 1; m <= 12; m++) {
-                    monthSel.innerHTML += `<option value="${m}">${m}</option>`;
+                    const monthName = new Date(2024, m-1, 1).toLocaleString('en', { month: 'short' });
+                    monthSel.innerHTML += `<option value="${m}">${m} (${monthName})</option>`;
                 }
-                const now = new Date();
-                for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
-                    yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+                
+                // Set default values - prefer most recent available month or current month
+                if (data.available_months.length > 0) {
+                    const mostRecent = data.available_months[data.available_months.length - 1];
+                    monthSel.value = mostRecent.month;
+                    yearSel.value = mostRecent.year;
+                } else {
+                    monthSel.value = data.current_month;
+                    yearSel.value = data.current_year;
                 }
-                monthSel.value = now.getMonth() + 1;
-                yearSel.value = now.getFullYear();
+                
+                // Add change event listeners
+                monthSel.onchange = loadAttendanceReportTable;
+                yearSel.onchange = loadAttendanceReportTable;
+                
+                // Show available months info
+                updateAvailableMonthsInfo(data.available_months);
             }
-            monthSel.onchange = loadAttendanceReportTable;
-            yearSel.onchange = loadAttendanceReportTable;
-            loadAttendanceReportTable();
+        }
+
+        function updateAvailableMonthsInfo(availableMonths) {
+            // Add info about available months to the UI
+            let infoText = '';
+            if (availableMonths.length > 0) {
+                const monthsList = availableMonths.map(m => `${m.display} (${m.record_count} records)`).join(', ');
+                infoText = `Available data: ${monthsList}`;
+            } else {
+                infoText = 'No data available. Please import attendance data first.';
+            }
+            
+            // Update the info element (now in separate container)
+            const infoElement = document.getElementById('availableMonthsInfo');
+            if (infoElement) {
+                infoElement.textContent = infoText;
+            }
         }
 
         function loadAttendanceReportTable() {
-            // Lần đầu load: không gửi parameter để backend tự động xác định
             const month = document.getElementById('attendanceMonth').value;
             const year = document.getElementById('attendanceYear').value;
             
-            console.log('Loading attendance report...');
+            console.log(`Loading attendance report for ${month}/${year}...`);
             
-            // Kiểm tra xem có dữ liệu cache cho tháng/năm hiện tại không
-            if (window.reportData && window.reportData.attendanceReport && 
-                window.reportData.attendanceReport.month == month && 
-                window.reportData.attendanceReport.year == year) {
-                renderPreviewTable('attendanceReportTab', window.reportData.attendanceReport.columns, window.reportData.attendanceReport.rows);
-                updateAttendanceReportPeriod(window.reportData.attendanceReport);
-            } else {
-                // Fetch dữ liệu mới - không gửi parameter để backend tự động xác định
-                fetch(`/get_attendance_report`)
-                    .then(res => res.json())
-                    .then(data => {
-                        console.log('Received data:', data);
-                        console.log('Columns:', data.columns);
-                        console.log('Rows count:', data.rows ? data.rows.length : 0);
-                        console.log('First row:', data.rows ? data.rows[0] : 'No rows');
-                        console.log('Period element exists:', !!document.getElementById('attendanceReportPeriod'));
-                        
-                        // Cache dữ liệu mới
-                        if (!window.reportData) {
-                            window.reportData = {};
-                        }
-                        
-                        window.reportData.attendanceReport = {
-                            ...data,
-                            month: month,
-                            year: year
-                        };
-                        
-                        // Cache abnormal data as well
-                        if (data.abnormal_late_early_columns && data.abnormal_late_early_rows) {
-                            window.reportData.abnormal_late_early = {
-                                columns: data.abnormal_late_early_columns,
-                                rows: data.abnormal_late_early_rows
-                            };
-                        }
-                        
-                        if (data.abnormal_missing_columns && data.abnormal_missing_rows) {
-                            window.reportData.abnormal_missing = {
-                                columns: data.abnormal_missing_columns,
-                                rows: data.abnormal_missing_rows
-                            };
-                        }
-                        console.log('About to render table...');
-                        try {
-                            renderPreviewTable('attendanceReportTab', data.columns, data.rows);
-                            console.log('Table rendered successfully');
-                        } catch (error) {
-                            console.error('Error rendering table:', error);
-                        }
-                        updateAttendanceReportPeriod(data);
-                        
-                        // Cập nhật dropdown theo tháng được xác định từ backend
-                        updateDropdownFromData(data);
-                    })
-                    .catch(error => {
-                        console.error('Error loading attendance report:', error);
-                    });
-            }
-        }
-        
-        function updateDropdownFromData(data) {
-            if (data.columns && data.columns.length > 0) {
-                // Tìm cột ngày đầu tiên và cuối cùng
-                const dayColumns = data.columns.slice(3, -8); // Bỏ qua Department, Name, Shift và 8 cột tổng hợp cuối
-                if (dayColumns.length > 0) {
-                    const firstDate = new Date(dayColumns[0]);
-                    const lastDate = new Date(dayColumns[dayColumns.length - 1]);
+            // Show loading indicator
+            showReportLoading();
+            
+            // Fetch data with month/year parameters
+            fetch(`/get_attendance_report?month=${month}&year=${year}`)
+                .then(res => res.json())
+                .then(data => {
+                    console.log('Received data:', data);
+                    console.log('Columns:', data.columns);
+                    console.log('Rows count:', data.rows ? data.rows.length : 0);
+                    console.log('Period:', data.period_start, 'to', data.period_end);
                     
-                    if (!isNaN(firstDate.getTime()) && !isNaN(lastDate.getTime())) {
-                        // Lấy tháng/năm từ ngày giữa
-                        const middleDate = new Date((firstDate.getTime() + lastDate.getTime()) / 2);
-                        const detectedMonth = middleDate.getMonth() + 1; // getMonth() trả về 0-11
-                        const detectedYear = middleDate.getFullYear();
-                        
-                        // Cập nhật dropdown
-                        const monthSel = document.getElementById('attendanceMonth');
-                        const yearSel = document.getElementById('attendanceYear');
-                        
-                        if (monthSel && yearSel) {
-                            monthSel.value = detectedMonth;
-                            yearSel.value = detectedYear;
-                        }
+                    // Store data with month/year info
+                    window.reportData = window.reportData || {};
+                    window.reportData.attendanceReport = {
+                        ...data,
+                        month: parseInt(month),
+                        year: parseInt(year)
+                    };
+                    
+                    // Render table
+                    renderPreviewTable('attendanceReportTab', data.columns, data.rows);
+                    updateAttendanceReportPeriod(data);
+                    
+                    // Store abnormal data for other tabs
+                    if (data.abnormal_late_early_columns && data.abnormal_late_early_rows) {
+                        window.reportData.abnormal_late_early = {
+                            columns: data.abnormal_late_early_columns,
+                            rows: data.abnormal_late_early_rows
+                        };
                     }
-                }
+                    
+                    if (data.abnormal_missing_columns && data.abnormal_missing_rows) {
+                        window.reportData.abnormal_missing = {
+                            columns: data.abnormal_missing_columns,
+                            rows: data.abnormal_missing_rows
+                        };
+                    }
+                    
+                    hideReportLoading();
+                })
+                .catch(error => {
+                    console.error('Error loading attendance report:', error);
+                    hideReportLoading();
+                });
+        }
+
+        function updateAttendanceReportPeriod(data) {
+            // Update period info in UI
+            const periodElement = document.getElementById('attendanceReportPeriod');
+            if (periodElement && data.period_start && data.period_end) {
+                periodElement.textContent = `Period: ${data.period_start} to ${data.period_end}`;
             }
         }
-        
+                        
+                        // (The following block is invalid and should be removed)
         function updateAttendanceReportPeriod(data) {
+            // Update period info in UI
             let periodElement = document.getElementById('attendanceReportPeriod');
             if (!periodElement) {
-                // Tạo element nếu không tồn tại
+                // Create element if it doesn't exist
                 const headerDiv = document.getElementById('attendanceReportHeader');
                 if (headerDiv) {
                     periodElement = document.createElement('div');
                     periodElement.id = 'attendanceReportPeriod';
                     periodElement.className = 'text-muted mb-2';
                     periodElement.style.fontSize = '0.9rem';
-                    headerDiv.insertBefore(periodElement, headerDiv.children[1]); // Insert after h2
-                    console.log('Created period element dynamically');
-                } else {
-                    console.log('Header div not found, skipping period update');
-                    return;
+                    headerDiv.insertBefore(periodElement, headerDiv.children[1]);
                 }
             }
             
-            if (data.columns && data.columns.length > 0) {
-                // Tìm cột ngày đầu tiên và cuối cùng
-                const dayColumns = data.columns.slice(3, -8); // Bỏ qua Department, Name, Shift và 8 cột tổng hợp cuối
-                if (dayColumns.length > 0) {
-                    const firstDate = dayColumns[0];
-                    const lastDate = dayColumns[dayColumns.length - 1];
-                    
-                    // Parse ngày tháng
-                    const startDate = new Date(firstDate);
-                    const endDate = new Date(lastDate);
-                    
-                    if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-                        const startStr = startDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-                        const endStr = endDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-                        periodElement.innerHTML = `<strong>Period:</strong> ${startStr} - ${endStr} <span class="text-info">(Auto-detected from data)</span>`;
-                    } else {
-                        periodElement.innerHTML = '<span class="text-warning">Unable to determine period from data</span>';
-                    }
-                } else {
-                    periodElement.innerHTML = '<span class="text-warning">No date columns found</span>';
-                }
-            } else {
-                periodElement.innerHTML = '<span class="text-warning">No data available</span>';
+            if (periodElement && data.period_start && data.period_end) {
+                periodElement.textContent = `Period: ${data.period_start} to ${data.period_end}`;
             }
         }
 
+        // Initialize when attendance report tab is shown
         if(document.getElementById('nav-attendance-report')) {
             document.getElementById('nav-attendance-report').addEventListener('shown.bs.tab', loadAttendanceReportTab)
         }
 
-        // Khởi tạo dropdown tháng/năm khi vào report lần đầu
+        // Legacy initialization function - now replaced by loadAvailableMonths
         let attendanceMonthInit = false;
         function initAttendanceMonthYearDropdown() {
             if (attendanceMonthInit) return;
-            const monthSel = document.getElementById('attendanceMonth');
-            const yearSel = document.getElementById('attendanceYear');
-            if (monthSel && monthSel.options.length === 0) {
-                for (let m = 1; m <= 12; m++) {
-                    monthSel.innerHTML += `<option value="${m}">${m}</option>`;
-                }
-                const now = new Date();
-                for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
-                    yearSel.innerHTML += `<option value="${y}">${y}</option>`;
-                }
-                monthSel.value = now.getMonth() + 1;
-                yearSel.value = now.getFullYear();
-            }
-            monthSel.onchange = loadAttendanceReportTab;
-            yearSel.onchange = loadAttendanceReportTab;
+            // This function is now handled by loadAvailableMonths()
+            loadAvailableMonths();
             attendanceMonthInit = true;
         }
-        // Gọi khi vào reportSection
+        
+        // Updated section switching logic
         const oldShowSection = showSection;
         showSection = function(sectionId) {
             oldShowSection(sectionId);
             if(sectionId==='reportSection') {
                 initAttendanceMonthYearDropdown();
-                loadAttendanceReportTab();
             }
         }
 
@@ -4117,7 +4124,19 @@
                     showLoading(true);
                     showAlert('', '');
                     
-                    fetch('/export')
+                    // Get current month/year from dropdowns
+                    const monthSel = document.getElementById('attendanceMonth');
+                    const yearSel = document.getElementById('attendanceYear');
+                    const currentMonth = monthSel ? monthSel.value : '';
+                    const currentYear = yearSel ? yearSel.value : '';
+                    
+                    // Build URL with month/year parameters
+                    let exportUrl = '/export';
+                    if (currentMonth && currentYear) {
+                        exportUrl += `?month=${currentMonth}&year=${currentYear}`;
+                    }
+                    
+                    fetch(exportUrl)
                         .then(response => {
                             showLoading(false);
                             if (!response.ok) {
@@ -4147,7 +4166,7 @@
                 });
             }
         });
-
+        
     </script>
 </body>
 </html> 
