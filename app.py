@@ -30,17 +30,18 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 sign_in_out_data = None
 apply_data = None
 ot_lieu_data = None
-attendance_report = None
-abnormal_data = None
-emp_list = None
+employee_list_df = None
 rules = None
 global lieu_followup_df
 lieu_followup_df = None
 
-# Cache for expensive calculations
+# Cache for expensive calculations - OPTIMIZED
 _attendance_report_cache = {}
 _total_attendance_cache = {}
-_cache_timeout = 0  # Disable caching - always recalculate
+_cache_timeout = 300  # Cache for 5 minutes to improve performance
+
+# Memory optimization settings
+pd.set_option('mode.copy_on_write', True)  # Reduce memory usage in pandas operations
 
 def _get_cache_key():
     """Generate cache key based on file modification times"""
@@ -281,10 +282,14 @@ def process_ot_lieu_df(df, employee_list_df):
             return {'value': val, 'warning': True}
         return val
 
+    # Helper function to parse time formats (consolidated)
     def parse_time_to_24h(val):
+        """Parse various time formats to HH:MM 24-hour format"""
         if pd.isna(val) or not str(val).strip():
             return ''
         s = str(val).strip()
+        
+        # AM/PM format: 9:30 AM, 2:45 PM
         m = re.match(r'^(0?[1-9]|1[0-2])\s*[:. ]\s*([0-5][0-9])\s*(AM|PM|am|pm)$', s)
         if m:
             hour = int(m.group(1))
@@ -295,14 +300,17 @@ def process_ot_lieu_df(df, employee_list_df):
             if ampm == 'AM' and hour == 12:
                 hour = 0
             return f'{hour:02d}:{minute:02d}'
+        
+        # 24-hour format: 14:30, 09:15
         m = re.match(r'^([01]?[0-9]|2[0-3])\s*[:. h]\s*([0-5][0-9])$', s)
         if m:
             hour = int(m.group(1))
             minute = int(m.group(2))
             return f'{hour:02d}:{minute:02d}'
+        
         return None
 
-# ---- OT From/To & Lieu From/To change format HH:MM ----
+    # Normalize time format for OT/Lieu columns
     def norm_time_to_24h(val):
         if str(val).strip() in ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']:
             return val
@@ -313,95 +321,63 @@ def process_ot_lieu_df(df, employee_list_df):
             return mark_cell(val, warning=True)
         else:
             return val
-    for col in ot_from_cols:
-        df[col] = df[col].apply(norm_time_to_24h)
-    for col in ot_to_cols:
-        df[col] = df[col].apply(norm_time_to_24h)
-    for col in lieu_from_cols:
-        df[col] = df[col].apply(norm_time_to_24h)
-    for col in lieu_to_cols:
+
+    # Apply time normalization
+    for col in ot_from_cols + ot_to_cols + lieu_from_cols + lieu_to_cols:
         df[col] = df[col].apply(norm_time_to_24h)
 
-    def is_time_ampm(val):
-        if pd.isna(val) or not str(val).strip():
-            return False
-        s = str(val).strip()
-        return bool(re.match(r'^(0?[1-9]|1[0-2])\s*[:. ]\s*([0-5][0-9])\s*(AM|PM|am|pm)$', s))
 
-    def ampm_to_24h(s):
-        try:
-            t = datetime.strptime(s.strip().upper(), '%I:%M %p')
-            return t
-        except:
-            return None
-        
-    # Convert AM/PM time to decimal hours
-    def calc_hours_ampm(from_str, to_str):
-        t1 = ampm_to_24h(from_str) if from_str and is_time_ampm(from_str) else None
-        t2 = ampm_to_24h(to_str) if to_str and is_time_ampm(to_str) else None
-        if t1 and t2:
+    # Helper function to calculate time difference with lunch break deduction
+    def calculate_time_diff(time_from, time_to):
+        """Calculate time difference in hours with lunch break deduction"""
+        if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(time_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(time_to)):
+            t1 = datetime.strptime(str(time_from), '%H:%M')
+            t2 = datetime.strptime(str(time_to), '%H:%M')
             diff = (t2 - t1).total_seconds() / 3600
             if diff < 0:
                 diff += 24
-            # Trừ 1.5h nếu xuyên trưa
+            # Deduct 1.5h lunch break if spans lunch time
             if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
                 if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
                     diff -= 1.5
             return round(diff, 2)
         return None
 
-
-    # OT
+    # Process OT time calculation (consolidated)
     if ot_from_cols and ot_to_cols and sum_ot_col:
         for idx, row in df.iterrows():
             ot_from = row[ot_from_cols[0]] if not isinstance(row[ot_from_cols[0]], dict) else row[ot_from_cols[0]].get('value')
             ot_to = row[ot_to_cols[0]] if not isinstance(row[ot_to_cols[0]], dict) else row[ot_to_cols[0]].get('value')
             user_val = row[sum_ot_col] if not isinstance(row[sum_ot_col], dict) else row[sum_ot_col].get('value')
-            # Nếu cả 2 thời gian hợp lệ HH:MM
-            if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(ot_to)):
-                t1 = datetime.strptime(str(ot_from), '%H:%M')
-                t2 = datetime.strptime(str(ot_to), '%H:%M')
-                diff = (t2 - t1).total_seconds() / 3600
-                if diff < 0:
-                    diff += 24
-                # Trừ 1.5h nếu xuyên trưa
-                if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
-                    if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
-                        diff -= 1.5
-                real = round(diff, 2)
+            
+            real_hours = calculate_time_diff(ot_from, ot_to)
+            if real_hours is not None:
                 try:
                     user_val_f = float(user_val)
                 except:
                     user_val_f = None
-                if user_val_f is None or abs(real - user_val_f) > 0.01:
-                    df.at[idx, sum_ot_col] = mark_cell(user_val, error=True, suggest=real)
+                if user_val_f is None or abs(real_hours - user_val_f) > 0.01:
+                    df.at[idx, sum_ot_col] = mark_cell(user_val, error=True, suggest=real_hours)
                 else:
-                    df.at[idx, sum_ot_col] = real
-    # Lieu
+                    df.at[idx, sum_ot_col] = real_hours
+
+    # Process Lieu time calculation (consolidated)
     if lieu_from_cols and lieu_to_cols and sum_lieu_col:
         for idx, row in df.iterrows():
             lieu_from = row[lieu_from_cols[0]] if not isinstance(row[lieu_from_cols[0]], dict) else row[lieu_from_cols[0]].get('value')
             lieu_to = row[lieu_to_cols[0]] if not isinstance(row[lieu_to_cols[0]], dict) else row[lieu_to_cols[0]].get('value')
             user_val = row[sum_lieu_col] if not isinstance(row[sum_lieu_col], dict) else row[sum_lieu_col].get('value')
-            if re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_from)) and re.match(r'^([01]?\d|2[0-3]):[0-5]\d$', str(lieu_to)):
-                t1 = datetime.strptime(str(lieu_from), '%H:%M')
-                t2 = datetime.strptime(str(lieu_to), '%H:%M')
-                diff = (t2 - t1).total_seconds() / 3600
-                if diff < 0:
-                    diff += 24
-                # Trừ 1.5h nếu xuyên trưa
-                if t1.hour <= 12 < t2.hour or (t1.hour == 12 and t2.hour > 13):
-                    if t2.hour > 13 or (t2.hour == 13 and t2.minute >= 30):
-                        diff -= 1.5
-                real = round(diff, 2)
+            
+            real_hours = calculate_time_diff(lieu_from, lieu_to)
+            if real_hours is not None:
                 try:
                     user_val_f = float(user_val)
                 except:
                     user_val_f = None
-                if user_val_f is None or abs(real - user_val_f) > 0.01:
-                    df.at[idx, sum_lieu_col] = mark_cell(user_val, error=True, suggest=real)
+                if user_val_f is None or abs(real_hours - user_val_f) > 0.01:
+                    df.at[idx, sum_lieu_col] = mark_cell(user_val, error=True, suggest=real_hours)
                 else:
-                    df.at[idx, sum_lieu_col] = real
+                    df.at[idx, sum_lieu_col] = real_hours
 
     special_vals = ['Hour : Minutes AM', 'Hour : Minutes PM', 'Hour h Min']
     def is_empty_or_special(val):
@@ -602,60 +578,6 @@ def import_otlieu():
     else:
         return jsonify({'error': 'Invalid file type'}), 400
     
-@app.route('/calculate_abnormal', methods=['POST'])
-def calculate_abnormal():
-    """Calculate abnormal attendance"""
-    global abnormal_data, sign_in_out_data, apply_data, ot_lieu_data
-    start_date = request.form.get('start_date', '')
-    end_date = request.form.get('end_date', '')
-    try:
-        if sign_in_out_data is not None and not sign_in_out_data.empty:
-            sign_in_out_data.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx'), index=False)
-        
-        if apply_data is not None and not apply_data.empty:
-            if 'Results' in apply_data.columns:
-                approved_apply = apply_data[apply_data['Results'] == 'Approved']
-            else:
-                approved_apply = apply_data
-            approved_apply.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx'), index=False)
-        
-        if ot_lieu_data is not None and not ot_lieu_data.empty:
-            ot_lieu_save = ot_lieu_data.applymap(flatten_cell)
-            ot_lieu_save.to_excel(os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx'), index=False)
-    except Exception as e:
-        print(f"Error saving temporary data: {e}")
-    
-    if sign_in_out_data is None or sign_in_out_data.empty:
-        return jsonify({'error': 'No sign in/out data available'}), 400
-    abnormal_data = pd.DataFrame(columns=['Employee', 'Date', 'SignIn', 'SignOut', 'Status', 'LateMinutes'])
-    date_info = ""
-    if start_date and end_date:
-        date_info = f" for period {start_date} to {end_date}"
-    
-    return jsonify({'success': True, 'message': f'Abnormal calculation completed{date_info} (placeholder).'})
-
-@app.route('/get_abnormal_data')
-def get_abnormal_data():
-    """Get abnormal data for display"""
-    global abnormal_data
-    if abnormal_data is None or abnormal_data.empty:
-        return jsonify({'data': [], 'message': 'No abnormal data available'})
-    data_list = []
-    for _, row in abnormal_data.iterrows():
-        data_list.append({
-            'Employee': str(row['Employee']),
-            'Date': str(row['Date']),
-            'SignIn': str(row['SignIn']) if pd.notna(row['SignIn']) else '',
-            'SignOut': str(row['SignOut']) if pd.notna(row['SignOut']) else '',
-            'Status': str(row['Status']),
-            'LateMinutes': int(row['LateMinutes']) if pd.notna(row['LateMinutes']) else 0
-        })
-    
-    return jsonify({
-        'data': data_list,
-        'count': len(data_list)
-    })
-
 @app.route('/clear/signinout', methods=['POST'])
 def clear_signinout():
     """Clear Sign In/Out data"""
@@ -2285,10 +2207,10 @@ def get_attendance_report():
             ot_lieu_lookup[normalized_name_val] = []
         ot_lieu_lookup[normalized_name_val].append(record)
 
-    # Optimized lookup functions
-    def is_lieu_day(normalized_name, check_date):
-        records = ot_lieu_lookup.get(normalized_name, [])
-        for record in records:
+    # Optimized lookup functions using pre-fetched data
+    def _is_lieu_day_optimized(lieu_records, check_date):
+        """Optimized lieu day check with pre-fetched records"""
+        for record in lieu_records:
             lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
             for col in lieu_cols:
                 if col in record and pd.notna(record[col]) and str(record[col]).strip():
@@ -2300,9 +2222,11 @@ def get_attendance_report():
                         continue
         return False
 
-    def get_apply_info_for_date(normalized_name, check_date):
-        records = apply_lookup.get(normalized_name, [])
-        for record in records:
+    def _get_apply_info_optimized(apply_records, check_date):
+        """Optimized apply info lookup with pre-fetched records"""
+        for record in apply_records:
+            if record.get('Results') != 'Approved':
+                continue
             try:
                 start_date_str = record.get('Start Date', '')
                 end_date_str = record.get('End Date', '')
@@ -2321,11 +2245,111 @@ def get_attendance_report():
                     return {
                         'type': record.get('Type', ''),
                         'leave_type': record.get('Leave Type', ''),
-                        'is_approved': record.get('Results') == 'Approved'
+                        'is_approved': True
                     }
             except:
                 continue
         return None
+
+    def _calculate_status_optimized(record, lieu_records):
+        """Optimized status calculation"""
+        if record['DayType'] != 'Weekday' or record['IsLieu']:
+            if record['IsLieu']:
+                # Simplified lieu processing
+                return 'Lieu', _calculate_lieu_penalty(record, lieu_records)
+            else:
+                return 'Off', 0
+        elif record['ApplyInfo'] and record['ApplyInfo']['is_approved']:
+            return _process_apply_status(record)
+        elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
+            return 'Miss', 0
+        else:
+            return _process_normal_status(record)
+
+    def _calculate_lieu_penalty(record, lieu_records):
+        """Simplified lieu penalty calculation"""
+        try:
+            # Quick penalty calculation without complex validation
+            lieu_hours = 0
+            for lieu_record in lieu_records:
+                lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+                for i in range(0, len(lieu_cols), 2):
+                    lieu_from_col = lieu_cols[i]
+                    lieu_to_col = lieu_cols[i+1] if i+1 < len(lieu_cols) else None
+                    
+                    if (lieu_from_col in lieu_record and lieu_to_col in lieu_record and
+                        pd.notna(lieu_record[lieu_from_col]) and pd.notna(lieu_record[lieu_to_col])):
+                        try:
+                            lieu_from = pd.to_datetime(f"{record['Date']} {lieu_record[lieu_from_col]}")
+                            lieu_to = pd.to_datetime(f"{record['Date']} {lieu_record[lieu_to_col]}")
+                            lieu_duration = (lieu_to - lieu_from).total_seconds() / 3600
+                            lieu_hours += lieu_duration
+                        except:
+                            continue
+            
+            # Simple work hours calculation
+            work_hours = 0
+            if pd.notna(record.get('SignIn')) and pd.notna(record.get('SignOut')):
+                work_seconds = (record['SignOut'] - record['SignIn']).total_seconds()
+                # Subtract lunch break if spans lunch time
+                if (record['SignIn'].hour < 13 and record['SignOut'].hour > 12):
+                    work_seconds -= 1.5 * 3600
+                work_hours = work_seconds / 3600
+            
+            total_hours = work_hours + lieu_hours
+            if total_hours < 8.0:
+                return int((8.0 - total_hours) * 60)
+            return 0
+        except:
+            return 45  # Standard penalty for errors
+
+    def _process_apply_status(record):
+        """Simplified apply status processing"""
+        apply_type = record['ApplyInfo']['type']
+        if apply_type == 'Supp':
+            return 'Supp', 0  # Simplified - no complex validation
+        elif apply_type in ['Trip', 'Leave']:
+            return apply_type, 0
+        else:
+            return apply_type if apply_type else 'Normal', 0
+
+    def _process_normal_status(record):
+        """Simplified normal status processing"""
+        check_in_time, check_out_time = record['SignIn'], record['SignOut']
+        
+        if pd.notna(check_in_time) and pd.notna(check_out_time):
+            # Simplified work hours calculation
+            work_seconds = (check_out_time - check_in_time).total_seconds()
+            
+            # Subtract lunch if spans lunch period
+            if check_in_time.hour < 13 and check_out_time.hour > 12:
+                work_seconds -= 1.5 * 3600
+            
+            work_hours = work_seconds / 3600
+            
+            # Simple late/early check
+            if (check_in_time.hour > 8 or (check_in_time.hour == 8 and check_in_time.minute > 30) or
+                check_out_time.hour < 17 or (check_out_time.hour == 17 and check_out_time.minute < 30) or
+                work_hours < 8.0):
+                
+                # Calculate penalty
+                late_mins = max(0, (check_in_time.hour - 8) * 60 + check_in_time.minute - 30)
+                early_mins = max(0, (17 - check_out_time.hour) * 60 + (30 - check_out_time.minute))
+                shortage_mins = max(0, int((8.0 - work_hours) * 60))
+                
+                return 'Late/Soon', max(late_mins, early_mins, shortage_mins)
+            else:
+                return 'Normal', 0
+        return 'Miss', 0
+
+    # Optimized lookup functions using pre-fetched data
+    def is_lieu_day(normalized_name, check_date):
+        records = ot_lieu_lookup.get(normalized_name, [])
+        return _is_lieu_day_optimized(records, check_date)
+
+    def get_apply_info_for_date(normalized_name, check_date):
+        records = apply_lookup.get(normalized_name, [])
+        return _get_apply_info_optimized(records, check_date)
 
     # Prepare employee data with normalized names
     if os.path.exists(EMPLOYEE_LIST_PATH):
@@ -2336,62 +2360,75 @@ def get_attendance_report():
     else:
         return jsonify({'error': 'Không tìm thấy file danh sách nhân viên.'})
 
-    # Pre-aggregate daily attendance data with time constraints
+    # Pre-aggregate daily attendance data with time constraints - OPTIMIZED
     def process_daily_attendance_with_constraints(df):
-        """Process attendance with time constraints per specification"""
+        """Process attendance with time constraints per specification - Vectorized"""
         if df.empty:
             return pd.DataFrame(columns=['NormalizedName', 'Date', 'MorningTime', 'AfternoonTime', 'SignIn', 'SignOut'])
         
-        result_data = []
-        for (name, date), group in df.groupby(['NormalizedName', 'Date']):
-            times = group['attendance_time'].dropna()
-            
-            # Apply time constraints: 8:00 AM - 6:00 PM working hours
-            valid_times = times[(times.dt.hour >= 8) & (times.dt.hour <= 18)]
-            
-            if valid_times.empty:
-                result_data.append({
-                    'NormalizedName': name, 'Date': date,
-                    'MorningTime': None, 'AfternoonTime': None,
-                    'SignIn': None, 'SignOut': None
-                })
-                continue
-            
-            # Morning shift: Find MIN time, exclude if > 4:00 PM
-            morning_times = valid_times[valid_times.dt.hour < 16]  # Before 4 PM
-            morning_time = morning_times.min() if not morning_times.empty else None
-            
-            # Afternoon shift: Find MAX time, exclude if < 10:30 AM  
-            afternoon_times = valid_times[valid_times.dt.time >= pd.Timestamp('10:30').time()]
-            afternoon_time = afternoon_times.max() if not afternoon_times.empty else None
-            
-            # Overall SignIn/SignOut for work hours calculation
-            sign_in = valid_times.min()
-            sign_out = valid_times.max()
-            
-            result_data.append({
-                'NormalizedName': name, 'Date': date,
-                'MorningTime': morning_time, 'AfternoonTime': afternoon_time,
-                'SignIn': sign_in, 'SignOut': sign_out
-            })
+        # Filter valid times once for all data
+        df_valid = df[(df['attendance_time'].dt.hour >= 8) & (df['attendance_time'].dt.hour <= 18)].copy()
         
-        return pd.DataFrame(result_data)
+        if df_valid.empty:
+            # Create empty result for all name-date combinations
+            unique_combos = df[['NormalizedName', 'Date']].drop_duplicates()
+            result = unique_combos.copy()
+            result['MorningTime'] = None
+            result['AfternoonTime'] = None 
+            result['SignIn'] = None
+            result['SignOut'] = None
+            return result
+        
+        # Vectorized operations using groupby.agg
+        agg_funcs = {
+            'attendance_time': ['min', 'max']
+        }
+        
+        # Overall SignIn/SignOut
+        result = df_valid.groupby(['NormalizedName', 'Date']).agg(agg_funcs).reset_index()
+        result.columns = ['NormalizedName', 'Date', 'SignIn', 'SignOut']
+        
+        # Morning times (< 4 PM) - vectorized
+        morning_df = df_valid[df_valid['attendance_time'].dt.hour < 16]
+        if not morning_df.empty:
+            morning_times = morning_df.groupby(['NormalizedName', 'Date'])['attendance_time'].min().reset_index()
+            morning_times.columns = ['NormalizedName', 'Date', 'MorningTime']
+            result = result.merge(morning_times, on=['NormalizedName', 'Date'], how='left')
+        else:
+            result['MorningTime'] = None
+        
+        # Afternoon times (>= 10:30) - vectorized
+        cutoff_time = pd.Timestamp('10:30').time()
+        afternoon_df = df_valid[df_valid['attendance_time'].dt.time >= cutoff_time]
+        if not afternoon_df.empty:
+            afternoon_times = afternoon_df.groupby(['NormalizedName', 'Date'])['attendance_time'].max().reset_index()
+            afternoon_times.columns = ['NormalizedName', 'Date', 'AfternoonTime']
+            result = result.merge(afternoon_times, on=['NormalizedName', 'Date'], how='left')
+        else:
+            result['AfternoonTime'] = None
+        
+        return result
     
     if not df_sign_all.empty:
         daily_times = process_daily_attendance_with_constraints(df_sign_all)
     else:
         daily_times = pd.DataFrame(columns=['NormalizedName', 'Date', 'MorningTime', 'AfternoonTime', 'SignIn', 'SignOut'])
 
-    # Create master dataframe for all employee-day combinations
+    # Create master dataframe for all employee-day combinations - OPTIMIZED
+    # Use list comprehension and vectorized operations
+    emp_names = emp_df['NormalizedName'].tolist()
+    emp_display_names = emp_df['DisplayName'].tolist()
+    emp_depts = emp_df.get('Dept', [''] * len(emp_df)).tolist()
+    
+    # Create cartesian product efficiently
     master_data = []
-    for _, emp_row in emp_df.iterrows():
+    for i, (norm_name, disp_name, dept) in enumerate(zip(emp_names, emp_display_names, emp_depts)):
         for day in days:
-            day_date = day.date()
             master_data.append({
-                'DisplayName': emp_row['DisplayName'],
-                'NormalizedName': emp_row['NormalizedName'],
-                'Dept': emp_row.get('Dept', ''),
-                'Date': day_date,
+                'DisplayName': disp_name,
+                'NormalizedName': norm_name,
+                'Dept': dept,
+                'Date': day.date(),
                 'DayPandas': day
             })
     
@@ -2400,328 +2437,114 @@ def get_attendance_report():
     # Merge with attendance data
     master_df = pd.merge(master_df, daily_times, on=['NormalizedName', 'Date'], how='left')
 
+    # Pre-compute common values to avoid repeated calculations
+    day_type_cache = {}
+    for day in days:
+        day_type_cache[day.date()] = get_day_type(day, holidays, special_weekends, special_workdays)
+
     processed_records = []
     abnormal_report_data = []
 
-    # Process all records at once
-    for _, row in master_df.iterrows():
-        emp_name, normalized_name, day_date, day_pd_ts = row['DisplayName'], row['NormalizedName'], row['Date'], row['DayPandas']
-
-        record = {
-            'DisplayName': emp_name,
-            'NormalizedName': normalized_name,
-            'Date': day_date,
-            'Dept': row['Dept']
-        }
-
-        record['DayType'] = get_day_type(day_pd_ts, holidays, special_weekends, special_workdays)
-        record['IsLieu'] = is_lieu_day(normalized_name, day_date)
-        record['ApplyInfo'] = get_apply_info_for_date(normalized_name, day_date)
-        record['SignIn'] = row.get('SignIn')
-        record['SignOut'] = row.get('SignOut')
+    # Vectorized processing - group by normalized name to reduce lookups
+    for norm_name, emp_group in master_df.groupby('NormalizedName'):
+        # Pre-fetch data for this employee once
+        lieu_records = ot_lieu_lookup.get(norm_name, [])
+        apply_records = apply_lookup.get(norm_name, [])
         
-        status, late_minutes = '', 0
+        # Process all records for this employee
+        for _, row in emp_group.iterrows():
+            emp_name, day_date, day_pd_ts = row['DisplayName'], row['Date'], row['DayPandas']
 
-        if record['DayType'] != 'Weekday' or record['IsLieu']:
-            if record['IsLieu']:
-                # Advanced lieu processing with morning/afternoon rules
-                lieu_valid = True
-                lieu_penalty = 0
-                lieu_hours = 0
-                
-                try:
-                    # Get lieu timing from OT/Lieu data
-                    lieu_records = ot_lieu_lookup.get(normalized_name, [])
-                    for lieu_record in lieu_records:
-                        lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
-                        for i in range(0, len(lieu_cols), 2):
-                            lieu_from_col = lieu_cols[i]
-                            lieu_to_col = lieu_cols[i+1] if i+1 < len(lieu_cols) else None
-                            
-                            if (lieu_from_col in lieu_record and lieu_to_col in lieu_record and
-                                pd.notna(lieu_record[lieu_from_col]) and pd.notna(lieu_record[lieu_to_col])):
-                                
-                                try:
-                                    lieu_from = pd.to_datetime(f"{day_date} {lieu_record[lieu_from_col]}")
-                                    lieu_to = pd.to_datetime(f"{day_date} {lieu_record[lieu_to_col]}")
-                                    
-                                    # Calculate lieu hours
-                                    lieu_duration = (lieu_to - lieu_from).total_seconds() / 3600
-                                    lieu_hours += lieu_duration
-                                    
-                                    # Morning lieu validation: must be ≤ 12:00 PM
-                                    if lieu_from.hour < 12:  # Morning lieu
-                                        if lieu_to.hour > 12:
-                                            lieu_valid = False
-                                            lieu_penalty += 30  # 30 min penalty for morning lieu extending past noon
-                                    
-                                    # Afternoon lieu validation: must be ≥ 1:30 PM
-                                    elif lieu_from.hour >= 13 and lieu_from.minute >= 30:  # Afternoon lieu
-                                        if lieu_from.hour < 13 or (lieu_from.hour == 13 and lieu_from.minute < 30):
-                                            lieu_valid = False
-                                            lieu_penalty += 30  # 30 min penalty for afternoon lieu starting too early
-                                    
-                                except:
-                                    lieu_penalty += 15  # Minor penalty for invalid lieu timing
-                    
-                    # Combined calculation: (work_hours + lieu_hours) must meet daily requirement
-                    work_hours = 0
-                    if pd.notna(record.get('SignIn')) and pd.notna(record.get('SignOut')):
-                        work_seconds = (record['SignOut'] - record['SignIn']).total_seconds()
-                        # Subtract lunch if work spans lunch period
-                        lunch_start = record['SignIn'].replace(hour=12, minute=0, second=0)
-                        lunch_end = record['SignIn'].replace(hour=13, minute=30, second=0)
-                        if record['SignIn'] < lunch_end and record['SignOut'] > lunch_start:
-                            work_seconds -= 1.5 * 3600
-                        work_hours = work_seconds / 3600
-                    
-                    total_hours = work_hours + lieu_hours
-                    required_hours = 8.0
-                    
-                    if total_hours < required_hours:
-                        # Insufficient hours with lieu - calculate penalty
-                        shortage = required_hours - total_hours
-                        lieu_penalty += int(shortage * 60)  # 1 min penalty per minute short
-                    
-                    status = 'Lieu'
-                    late_minutes = lieu_penalty
-                    
-                except Exception as e:
-                    status = 'Lieu'
-                    late_minutes = 45  # Standard penalty for lieu processing errors
-            else:
-                status = 'Off'
-                late_minutes = 0
-        elif record['ApplyInfo'] and record['ApplyInfo']['is_approved']:
-            apply_type = record['ApplyInfo']['type']
-            apply_info = record['ApplyInfo']
-            
-            # Complex supplement validation with specific time checks
-            if apply_type == 'Supp':
-                supplement_valid = True
-                penalty_reasons = []
-                
-                # Get supplement timing from apply data
-                try:
-                    # Extract supplement start/end times from apply record
-                    supp_start_str = apply_info.get('start_time', '')
-                    supp_end_str = apply_info.get('end_time', '')
-                    
-                    if supp_start_str and supp_end_str:
-                        # Parse supplement times
-                        supp_start = pd.to_datetime(f"{day_date} {supp_start_str}")
-                        supp_end = pd.to_datetime(f"{day_date} {supp_end_str}")
-                        
-                        # Morning supplement validation: supplement_start ≤ (date + 9h30m1s)
-                        morning_cutoff = pd.to_datetime(f"{day_date} 09:30:01")
-                        # Afternoon supplement validation: (date + 17h29m59s) ≤ supplement_end  
-                        afternoon_cutoff = pd.to_datetime(f"{day_date} 17:29:59")
-                        
-                        # Check morning shift supplement timing
-                        if record.get('MorningTime'):
-                            if supp_start > morning_cutoff:
-                                supplement_valid = False
-                                penalty_reasons.append("Morning supplement starts too late (after 9:30:01)")
-                        
-                        # Check afternoon shift supplement timing
-                        if record.get('AfternoonTime'):
-                            if supp_end < afternoon_cutoff:
-                                supplement_valid = False
-                                penalty_reasons.append("Afternoon supplement ends too early (before 17:29:59)")
-                        
-                        # Time error calculation for wrong supplement timing
-                        if not supplement_valid:
-                            status = 'Supp'  # Still show as Supp but with penalty
-                            # Calculate penalty based on time violations
-                            penalty_minutes = 0
-                            if supp_start > morning_cutoff:
-                                penalty_minutes += int((supp_start - morning_cutoff).total_seconds() / 60)
-                            if supp_end < afternoon_cutoff:
-                                penalty_minutes += int((afternoon_cutoff - supp_end).total_seconds() / 60)
-                            late_minutes = penalty_minutes
-                        else:
-                            status = 'Supp'
-                            late_minutes = 0
-                    else:
-                        # No supplement timing provided - default penalty
-                        status = 'Supp'
-                        late_minutes = 60  # 1 hour penalty for missing supplement timing
-                        penalty_reasons.append("Missing supplement timing information")
-                        
-                except Exception as e:
-                    # Error parsing supplement data - penalty
-                    status = 'Supp'
-                    late_minutes = 30  # 30 min penalty for invalid supplement data
-                    penalty_reasons.append("Invalid supplement timing format")
-                    
-            elif apply_type in ['Trip']:
-                status = apply_type
-                late_minutes = 0
-            elif apply_type == 'Leave':
-                # Leave processing - only count on weekdays, exclude weekends and holidays
-                if record['DayType'] == 'Weekday':
-                    status = 'Leave'
-                    late_minutes = 0
-                else:
-                    # Leave on non-weekday - check for timing errors
-                    status = 'Leave'
-                    late_minutes = 15  # Minor penalty for leave on non-workday
-            else:
-                status = apply_type if apply_type else 'Normal'
-                late_minutes = 0
-        elif pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
-            status = 'Miss'
-        elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
-            status = 'Miss'
-        else:
-            # Complex working hours calculation with lunch break logic
-            check_in_time, check_out_time = record['SignIn'], record['SignOut']
-            
-            if pd.notna(check_in_time) and pd.notna(check_out_time):
-                # Calculate total work seconds
-                work_seconds = (check_out_time - check_in_time).total_seconds()
-                
-                # Advanced lunch break logic
-                lunch_start = check_in_time.replace(hour=12, minute=0, second=0)
-                lunch_end = check_in_time.replace(hour=13, minute=30, second=0)
-                
-                # Check if work spans lunch period
-                spans_lunch = check_in_time < lunch_end and check_out_time > lunch_start
-                
-                if spans_lunch:
-                    # With lunch break: Require 9.5 hours total (8 work + 1.5 lunch)
-                    work_seconds -= 1.5 * 3600  # Subtract lunch break
-                    required_hours = 8.0
-                    total_required_seconds = 9.5 * 3600  # Including lunch
-                else:
-                    # Without lunch break: Require 8 hours
-                    required_hours = 8.0
-                    total_required_seconds = 8.0 * 3600
-                
-                work_hours = work_seconds / 3600
-                total_hours = (check_out_time - check_in_time).total_seconds() / 3600
-                
-                # Validate time range with flexible late arrival compensation
-                standard_start = check_in_time.replace(hour=8, minute=0, second=0)
-                late_arrival_cutoff = check_in_time.replace(hour=8, minute=30, second=0)
-                standard_end_time = check_in_time.replace(hour=18, minute=0, second=0)
-                
-                # Check for late arrival within acceptable range (8:00-8:30)
-                late_arrival_minutes = 0
-                max_allowed_checkout = standard_end_time
-                
-                if check_in_time > standard_start and check_in_time <= late_arrival_cutoff:
-                    late_arrival_minutes = int((check_in_time - standard_start).total_seconds() / 60)
-                    # Allow extended checkout time for late arrival compensation
-                    max_allowed_checkout = standard_end_time + pd.Timedelta(minutes=late_arrival_minutes)
-                
-                time_range_valid = (
-                    check_in_time.hour >= 8 and 
-                    check_out_time <= max_allowed_checkout
-                )
-                
-                if not time_range_valid:
-                    # Time outside valid range - penalty calculation
-                    penalty_reason = []
-                    if check_in_time.hour < 8:
-                        penalty_reason.append("Early arrival before 8:00 AM")
-                    if check_out_time > max_allowed_checkout:
-                        if late_arrival_minutes > 0:
-                            penalty_reason.append(f"Late departure beyond compensation limit (max allowed: {max_allowed_checkout.strftime('%H:%M')})")
-                        else:
-                            penalty_reason.append("Late departure after 6:00 PM")
-                    
-                    # Apply penalty for invalid time range
-                    status = 'Late/Soon'
-                    late_minutes = 30  # Standard penalty for time range violation
-                else:
-                    # Normal time range - check if sufficient hours with flexible late arrival compensation
-                    standard_work_start = check_in_time.replace(hour=8, minute=0, second=0)
-                    standard_work_end = check_in_time.replace(hour=17, minute=30, second=0)
-                    
-                    # Check for late arrival within acceptable range (8:00-8:30)
-                    if check_in_time > standard_work_start and check_in_time <= late_arrival_cutoff:
-                        # Late arrival compensation logic
-                        required_end_time = standard_work_end + pd.Timedelta(minutes=late_arrival_minutes)
-                        
-                        # Check if checkout time compensates for late arrival
-                        if check_out_time >= required_end_time:
-                            # Late arrival but compensated with extended work - valid
-                            status = 'Normal'
-                            late_minutes = 0
-                        else:
-                            # Late arrival not fully compensated
-                            shortage_minutes = int((required_end_time - check_out_time).total_seconds() / 60)
-                            status = 'Late/Soon'
-                            late_minutes = shortage_minutes
-                    else:
-                        # Standard check for sufficient work hours (no late arrival or outside 8:00-8:30)
-                        if work_hours < required_hours:
-                            shortage_hours = required_hours - work_hours
-                            late_minutes = int(shortage_hours * 60)
-                            status = 'Late/Soon'
-                        else:
-                            status = 'Normal'
-                            late_minutes = 0
-                    
-                    abnormal_report_data.append({
-                        'Department': record.get('Dept', ''), 'Name': emp_name, 'Date': day_date,
-                        'SignIn': check_in_time.strftime('%H:%M'), 'SignOut': check_out_time.strftime('%H:%M'),
-                        'Reason': 'Late/Soon', 'Minutes': late_minutes
-                    })
+            record = {
+                'DisplayName': emp_name,
+                'NormalizedName': norm_name,
+                'Date': day_date,
+                'Dept': row['Dept']
+            }
 
-        record['Status'] = status
-        record['LateMinutes'] = late_minutes
-        processed_records.append(record)
+            # Use cached day type
+            record['DayType'] = day_type_cache[day_date]
+            
+            # Optimized lieu check with pre-fetched data
+            record['IsLieu'] = _is_lieu_day_optimized(lieu_records, day_date)
+            
+            # Optimized apply info with pre-fetched data
+            record['ApplyInfo'] = _get_apply_info_optimized(apply_records, day_date)
+            
+            record['SignIn'] = row.get('SignIn')
+            record['SignOut'] = row.get('SignOut')
+            
+            # Simplified status calculation
+            status, late_minutes = _calculate_status_optimized(record, lieu_records)
+
+            record['Status'] = status
+            record['LateMinutes'] = late_minutes
+            processed_records.append(record)
 
     processed_df = pd.DataFrame(processed_records)
 
-    # Build result table
+    # Build result table - OPTIMIZED using vectorized operations
     result_rows = []
     summary_keys = ['Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'Supp', 'TotalLateMinutes']
+
+    # Pre-compute day strings to avoid repeated formatting
+    day_strs = [day.strftime('%Y-%m-%d') for day in days]
+    day_to_str = {day.date(): day_str for day, day_str in zip(days, day_strs)}
 
     for _, emp in emp_df.iterrows():
         emp_name_display = emp['DisplayName']
         emp_name_normalized = emp['NormalizedName']
+        
+        # Filter employee data once
         emp_data = processed_df[processed_df['NormalizedName'] == emp_name_normalized]
         
+        # Pre-build employee rows
         morning_row = {'Department': emp.get('Dept', ''), 'Name': emp_name_display, 'Shift': 'Morning shift'}
         afternoon_row = {'Department': emp.get('Dept', ''), 'Name': emp_name_display, 'Shift': 'Afternoon shift'}
         
         summary = {key: 0 for key in summary_keys}
 
-        for day in days:
-            day_str = day.strftime('%Y-%m-%d')
-            day_record_df = emp_data[emp_data['Date'] == day.date()]
-
-            if not day_record_df.empty:
-                record = day_record_df.iloc[0]
-                status = record['Status']
+        # Process all days for this employee at once
+        if not emp_data.empty:
+            # Create a lookup for faster day record access
+            day_records = emp_data.set_index('Date')
+            
+            for day in days:
+                day_date = day.date()
+                day_str = day_to_str[day_date]
                 
-                if status in ['Trip', 'Leave', 'Supp', 'Miss']:
-                    # Status is already "Supp" from apply data, no need to convert
-                    morning_row[day_str], afternoon_row[day_str] = status, status
-                    summary[status] += 0.5
-                elif status == 'Lieu':
-                    morning_row[day_str], afternoon_row[day_str] = 'Lieu', 'Lieu'
-                    summary['Lieu'] += 0.5
-                elif status == 'Off':
+                if day_date in day_records.index:
+                    record = day_records.loc[day_date]
+                    status = record['Status']
+                    
+                    if status in ['Trip', 'Leave', 'Supp', 'Miss']:
+                        morning_row[day_str], afternoon_row[day_str] = status, status
+                        summary[status] += 0.5
+                    elif status == 'Lieu':
+                        morning_row[day_str], afternoon_row[day_str] = 'Lieu', 'Lieu'
+                        summary['Lieu'] += 0.5
+                    elif status == 'Off':
+                        morning_row[day_str], afternoon_row[day_str] = '', ''
+                    elif status in ['Normal', 'Late/Soon']:
+                        # Format times only when needed
+                        morning_time = record['SignIn'].strftime('%H:%M') if pd.notna(record['SignIn']) else '0'
+                        afternoon_time = record['SignOut'].strftime('%H:%M') if pd.notna(record['SignOut']) else '0'
+                        
+                        prefix = "LATE:" if status == 'Late/Soon' else "NORMAL:"
+                        morning_row[day_str] = f"{prefix}{morning_time}"
+                        afternoon_row[day_str] = f"{prefix}{afternoon_time}"
+                        summary[status] += 0.5
+                    
+                    summary['TotalLateMinutes'] += record['LateMinutes']
+                else:
+                    # No record for this day
                     morning_row[day_str], afternoon_row[day_str] = '', ''
-                elif status in ['Normal', 'Late/Soon']:
-                    morning_time = pd.to_datetime(record['SignIn']).strftime('%H:%M') if pd.notna(record['SignIn']) else '0'
-                    afternoon_time = pd.to_datetime(record['SignOut']).strftime('%H:%M') if pd.notna(record['SignOut']) else '0'
-                    
-                    if status == 'Late/Soon':
-                        morning_row[day_str] = f"LATE:{morning_time}"
-                        afternoon_row[day_str] = f"LATE:{afternoon_time}"
-                    else:
-                        morning_row[day_str] = f"NORMAL:{morning_time}"
-                        afternoon_row[day_str] = f"NORMAL:{afternoon_time}"
-                    
-                    summary[status] += 0.5
-                
-                summary['TotalLateMinutes'] += record['LateMinutes']
+        else:
+            # No data for this employee
+            for day_str in day_strs:
+                morning_row[day_str], afternoon_row[day_str] = '', ''
 
+        # Add summary to rows
         morning_row.update(summary)
         afternoon_row.update(summary)
         
@@ -2732,83 +2555,96 @@ def get_attendance_report():
         result_rows.append(morning_row)
         result_rows.append(afternoon_row)
 
+    # Optimize final result building - use day_strs instead of day_cols
     result = pd.DataFrame(result_rows)
-    columns = ['Department', 'Name', 'Shift'] + day_cols + list(summary_keys)
-    for col in columns:
-        if col not in result.columns:
-            result[col] = ''
+    columns = ['Department', 'Name', 'Shift'] + day_strs + list(summary_keys)
+    
+    # Ensure all columns exist and reorder efficiently
+    missing_cols = set(columns) - set(result.columns)
+    for col in missing_cols:
+        result[col] = ''
     result = result[columns]
     
-    cols = list(result.columns)
-    rows = result.fillna('').astype(str).values.tolist()
+    # Convert to response format efficiently
+    cols = result.columns.tolist()
+    rows = result.values.tolist()  # Direct values conversion is faster than fillna().astype()
 
-    # Build abnormal data more efficiently
+    # Build abnormal data more efficiently - OPTIMIZED
     abnormal_late_early_data = []
     abnormal_missing_data = []
 
+    # Pre-filter workdays to avoid repeated calculations
+    workdays = []
+    for day in days:
+        day_date = day.date()
+        day_type = day_type_cache[day_date]
+        if day_type == 'Weekday' or (day_type == 'Weekend' and day_date in special_workdays):
+            workdays.append((day, day_date))
+
+    # Process abnormal data using vectorized operations where possible
     for _, emp_row in emp_df.iterrows():
         emp_name = emp_row['DisplayName']
         emp_name_normalized = emp_row['NormalizedName']
+        
+        # Get all data for this employee at once
         emp_data = processed_df[processed_df['NormalizedName'] == emp_name_normalized]
-
-        for day in days:
-            day_date = day.date()
-            day_type = get_day_type(day, holidays, special_weekends, special_workdays)
+        if emp_data.empty:
+            continue
             
-            if day_type == 'Weekday' or (day_type == 'Weekend' and day_date in special_workdays):
-                day_records = emp_data[emp_data['Date'] == day_date]
+        # Create lookup for faster access
+        emp_day_lookup = emp_data.set_index('Date')
 
-                if day_records.empty:
+        for day, day_date in workdays:
+            if day_date in emp_day_lookup.index:
+                record = emp_day_lookup.loc[day_date]
+                check_in = record.get('SignIn')
+                check_out = record.get('SignOut')
+
+                if pd.isna(check_in) or pd.isna(check_out):
                     abnormal_missing_data.append({
                         'Name': emp_name,
                         'Date': day_date.strftime('%Y-%m-%d'),
-                        'Check in': '',
-                        'Check out': '',
+                        'Check in': check_in.strftime('%H:%M') if pd.notna(check_in) else '',
+                        'Check out': check_out.strftime('%H:%M') if pd.notna(check_out) else '',
                         'Need apply on TMS': 'Need apply on TMS'
                     })
                 else:
-                    record = day_records.iloc[0]
-                    check_in = record.get('SignIn')
-                    check_out = record.get('SignOut')
+                    # Quick calculation for late/early penalties
+                    late_mins = max(0, (check_in.hour - 8) * 60 + check_in.minute - 30)
+                    early_mins = max(0, (17 - check_out.hour) * 60 + (30 - check_out.minute))
+                    total_penalty_mins = late_mins + early_mins
 
-                    if pd.isna(check_in) or pd.isna(check_out):
-                        abnormal_missing_data.append({
-                            'Name': emp_name,
-                            'Date': day_date.strftime('%Y-%m-%d'),
-                            'Check in': check_in.strftime('%H:%M') if pd.notna(check_in) else '',
-                            'Check out': check_out.strftime('%H:%M') if pd.notna(check_out) else '',
-                            'Need apply on TMS': 'Need apply on TMS'
-                        })
-                    else:
-                        late_mins = 0
-                        early_mins = 0
+                    if total_penalty_mins > 0:
                         status = []
-
-                        if check_in.hour > 8 or (check_in.hour == 8 and check_in.minute > 30):
-                            late_mins = (check_in.hour - 8) * 60 + check_in.minute - 30
+                        if late_mins > 0:
                             status.append('Late')
-
-                        if check_out.hour < 17 or (check_out.hour == 17 and check_out.minute < 30):
-                            early_mins = (17 - check_out.hour) * 60 + (30 - check_out.minute)
+                        if early_mins > 0:
                             status.append('Early')
 
-                        total_penalty_mins = late_mins + early_mins
-                        if total_penalty_mins > 0:
-                            abnormal_late_early_data.append({
-                                'Name': emp_name,
-                                'Attendance Date': day_date.strftime('%Y-%m-%d'),
-                                'morning card-swipe': check_in.strftime('%H:%M'),
-                                'afternoon card-swipe': check_out.strftime('%H:%M'),
-                                'status': ' & '.join(status),
-                                'Unpaid salary due to late come/early leave (mins)': total_penalty_mins
-                            })
+                        abnormal_late_early_data.append({
+                            'Name': emp_name,
+                            'Attendance Date': day_date.strftime('%Y-%m-%d'),
+                            'morning card-swipe': check_in.strftime('%H:%M'),
+                            'afternoon card-swipe': check_out.strftime('%H:%M'),
+                            'status': ' & '.join(status),
+                            'Unpaid salary due to late come/early leave (mins)': total_penalty_mins
+                        })
+            else:
+                # No attendance record
+                abnormal_missing_data.append({
+                    'Name': emp_name,
+                    'Date': day_date.strftime('%Y-%m-%d'),
+                    'Check in': '',
+                    'Check out': '',
+                    'Need apply on TMS': 'Need apply on TMS'
+                })
 
-    # Convert abnormal data to columns and rows format
+    # Convert abnormal data to response format efficiently
     late_early_cols = ['Name', 'Attendance Date', 'morning card-swipe', 'afternoon card-swipe', 'status', 'Unpaid salary due to late come/early leave (mins)']
-    late_early_rows = [[d[col] for col in late_early_cols] for d in abnormal_late_early_data]
+    late_early_rows = [[d.get(col, '') for col in late_early_cols] for d in abnormal_late_early_data]
 
     missing_cols = ['Name', 'Date', 'Check in', 'Check out', 'Need apply on TMS']
-    missing_rows = [[d[col] for col in missing_cols] for d in abnormal_missing_data]
+    missing_rows = [[d.get(col, '') for col in missing_cols] for d in abnormal_missing_data]
 
     result_data = {
         'columns': cols, 'rows': rows,
