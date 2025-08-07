@@ -689,9 +689,11 @@ def export():
         # 9. Abnormal Late/Early Data
         if 'Abnormal LateCome-EarlyLeave' in wb.sheetnames:
             try:
-                abnormal_late_early_df = calculate_abnormal_late_early_for_export(selected_month, selected_year)
-                if abnormal_late_early_df is not None and not abnormal_late_early_df.empty:
-                    write_df_to_sheet(wb['Abnormal LateCome-EarlyLeave'], abnormal_late_early_df, start_row=2)
+                abnormal_late_early_result = calculate_abnormal_late_early_for_export(selected_month, selected_year)
+                if isinstance(abnormal_late_early_result, dict) and 'columns' in abnormal_late_early_result and 'rows' in abnormal_late_early_result:
+                    abnormal_late_early_df = pd.DataFrame(abnormal_late_early_result['rows'], columns=abnormal_late_early_result['columns'])
+                    if not abnormal_late_early_df.empty:
+                        write_df_to_sheet(wb['Abnormal LateCome-EarlyLeave'], abnormal_late_early_df, start_row=2)
             except Exception as e:
                 print(f"Error calculating Abnormal Late/Early data: {e}")
 
@@ -3171,367 +3173,27 @@ def calculate_otlieu_report_for_export():
         return {'columns': [], 'rows': []}
 
 def calculate_total_attendance_detail_for_export(month=None, year=None, employee_list_df=None, apply_data=None, ot_lieu_data=None, sign_in_out_data=None):
-    """Calculate Total Attendance Detail data for export (without request context)"""
-    global rules
-    
-    # Load data from temp files if not provided
-    if sign_in_out_data is None or sign_in_out_data.empty:
-        temp_signinout_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_signinout.xlsx')
-        if os.path.exists(temp_signinout_path):
-            sign_in_out_data = pd.read_excel(temp_signinout_path)
-        else:
-            return {'columns': [], 'rows': []}
-    
-    if apply_data is None or apply_data.empty:
-        temp_apply_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_apply.xlsx')
-        if os.path.exists(temp_apply_path):
-            apply_data = pd.read_excel(temp_apply_path)
-        else:
-            return {'columns': [], 'rows': []}
-    
-    if ot_lieu_data is None or ot_lieu_data.empty:
-        temp_otlieu_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_otlieu.xlsx')
-        if os.path.exists(temp_otlieu_path):
-            ot_lieu_data = pd.read_excel(temp_otlieu_path)
-        else:
-            return {'columns': [], 'rows': []}
-    
-    if employee_list_df is None or employee_list_df.empty:
-        emp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'employee_list.csv')
-        if os.path.exists(emp_path):
-            employee_list_df = pd.read_csv(emp_path, dtype=str)
-        else:
-            return {'columns': [], 'rows': []}
-    
-    if rules is None or rules.empty:
-        rules_path = os.path.join(app.config['UPLOAD_FOLDER'], 'rules.xlsx')
-        if os.path.exists(rules_path):
-            rules = pd.read_excel(rules_path)
-        else:
-            return {'columns': [], 'rows': []}
-    
+    """Calculate Total Attendance Detail data for export - uses same logic as frontend"""
     try:
-        # Determine month and year
-        if month and year:
-            target_month = month
-            target_year = year
-        else:
-            # Auto-detect from data using most common month (same logic as get_attendance_report)
-            target_month, target_year = 7, 2024  # Default fallback
-            if sign_in_out_data is not None and not sign_in_out_data.empty:
-                dates = [pd.to_datetime(r.get('attendance_time')) for _, r in sign_in_out_data.iterrows() if pd.notna(r.get('attendance_time'))]
-                if dates:
-                    month_counts = {}
-                    for date in dates:
-                        month_key = (date.month, date.year)
-                        month_counts[month_key] = month_counts.get(month_key, 0) + 1
-                    most_common_month = max(month_counts.items(), key=lambda x: x[1])[0]
-                    target_month, target_year = most_common_month
-
-        # Calculate date range: 19th of previous month to 20th of current month
-        if target_month == 1:
-            prev_month = 12
-            prev_year = target_year - 1
-        else:
-            prev_month = target_month - 1
-            prev_year = target_year
-        
-        start_date = pd.Timestamp(prev_year, prev_month, 19)
-        end_date = pd.Timestamp(target_year, target_month, 20)
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-        
-        # Get special days from rules
-        holidays, special_weekends, special_workdays = get_special_days_from_rules(rules)
-        
-        # Helper functions
-        def get_day_type(dt, holidays, special_weekends, special_workdays):
-            dt_date = dt.date()
-            if dt_date in holidays:
-                return 'Holiday'
-            if dt_date in special_workdays:
-                return 'Weekday'
-            if dt_date in special_weekends:
-                return 'Weekend'
-            if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
-                return 'Weekend'
-            return 'Weekday'
-        
-        def extract_name_from_emp_name(emp_name):
-            # Tách tên nhân viên từ format "Do Thi Thu Trang6970000006"
-            import re
-            if not isinstance(emp_name, str):
-                return ""
-            match = re.match(r'^(.+?)(\d{7,10})$', emp_name.strip())
-            if match:
-                return match.group(1).strip()
-            return emp_name.strip()
-        
-        def extract_id_from_name(name_str):
-            """Extract employee ID from name string like 'Tran Minh Tri10349366'"""
-            import re
-            if not isinstance(name_str, str):
-                return None
-            # Look for 8+ digit number at the end of the string
-            match = re.search(r'(\d{8,})$', name_str.strip())
-            return match.group(1) if match else None
-        
-        def is_lieu_day(emp_name, check_date, ot_lieu_data):
-            if ot_lieu_data is None or ot_lieu_data.empty:
-                return False
-            # Use ID-based matching
-            emp_id_from_name = extract_id_from_name(emp_name)
-            if not emp_id_from_name:
-                return False
+        # Call get_total_attendance_detail to get the same data as frontend
+        with app.test_request_context():
+            response = get_total_attendance_detail()
             
-            for _, record in ot_lieu_data.iterrows():
-                name_val = str(record.get('Name', '') or '')
-                record_id = extract_id_from_name(name_val)
-                if record_id == emp_id_from_name:
-                    lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
-                    for col in lieu_cols:
-                        if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                            try:
-                                lieu_date = pd.to_datetime(record[col]).date()
-                                if lieu_date == check_date:
-                                    return True
-                            except:
-                                continue
-            return False
+        if response.status_code == 200:
+            data = response.get_json()
+            if data and 'columns' in data and 'data' in data:
+                return {
+                    'columns': data['columns'],
+                    'rows': data['data']  # Frontend uses 'data' key, not 'rows'
+                }
         
-        def has_ot_on_date(emp_name, check_date, ot_lieu_data):
-            if ot_lieu_data is None or ot_lieu_data.empty:
-                return False
-            # Use ID-based matching
-            emp_id_from_name = extract_id_from_name(emp_name)
-            if not emp_id_from_name:
-                return False
-                
-            for _, record in ot_lieu_data.iterrows():
-                name_val = str(record.get('Name', '') or '')
-                record_id = extract_id_from_name(name_val)
-                if record_id == emp_id_from_name:
-                    ot_date_cols = ['OT Date', 'Date', 'OT date']
-                    for col in ot_date_cols:
-                        if col in record and pd.notna(record[col]) and str(record[col]).strip():
-                            try:
-                                ot_date = pd.to_datetime(record[col]).date()
-                                if ot_date == check_date:
-                                    return True
-                            except:
-                                continue
-            return False
-        
-        def has_apply_leave_on_date(emp_name, check_date, apply_data):
-            if apply_data is None or apply_data.empty:
-                return False
-            # Use ID-based matching
-            emp_id_from_name = extract_id_from_name(emp_name)
-            if not emp_id_from_name:
-                return False
-                
-            for _, record in apply_data.iterrows():
-                name_val = str(record.get('Emp Name', '') or record.get('Name', ''))
-                record_id = extract_id_from_name(name_val)
-                
-                if (record_id == emp_id_from_name and 
-                    record.get('Results') == 'Approved' and
-                    record.get('Type') == 'Leave'):
-                    
-                    try:
-                        start_date_str = record.get('Start Date', '')
-                        end_date_str = record.get('End Date', '')
-                        apply_date_str = record.get('Apply Date', '')
-                        
-                        if start_date_str:
-                            start_date = pd.to_datetime(start_date_str).date()
-                        elif apply_date_str:
-                            start_date = pd.to_datetime(apply_date_str).date()
-                        else:
-                            continue
-                            
-                        end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
-                        
-                        if start_date <= check_date <= end_date:
-                            return True
-                    except:
-                        continue
-            return False
-        
-        def get_shift_info(emp_name, check_date, sign_in_out_data):
-            if sign_in_out_data is None or sign_in_out_data.empty:
-                return 'NONE'
-            
-            # Use ID-based matching
-            emp_id_from_name = extract_id_from_name(emp_name)
-            if not emp_id_from_name:
-                return 'NONE'
-            
-            # Filter by ID-based matching
-            day_records = sign_in_out_data[
-                (sign_in_out_data['emp_name'].astype(str).apply(lambda x: extract_id_from_name(x)) == emp_id_from_name) &
-                (pd.to_datetime(sign_in_out_data['attendance_time'], errors='coerce').dt.date == check_date)
-            ]
-            
-            if day_records.empty:
-                return 'NONE'
-            
-            times = pd.to_datetime(day_records['attendance_time'], errors='coerce')
-            times = times.dropna()
-            
-            if len(times) == 0:
-                return 'NONE'
-            
-            # Check for morning shift (before 12:00)
-            morning_times = times[times.dt.hour < 12]
-            # Check for afternoon shift (after 12:00)
-            afternoon_times = times[times.dt.hour >= 12]
-            
-            if len(morning_times) > 0 and len(afternoon_times) > 0:
-                return 'FULL'
-            elif len(morning_times) > 0:
-                return 'AM'
-            elif len(afternoon_times) > 0:
-                return 'PM'
-            else:
-                return 'NONE'
-        
-        # Calculate for each employee
-        result_rows = []
-        row_no = 1
-        
-        for _, emp in employee_list_df.iterrows():
-            emp_name = emp['Name']
-            emp_id = emp.get('ID Number', '')
-            emp_dept = emp.get('Dept', '')
-            
-            # Initialize counters
-            normal_days = 0.0
-            annual_leave = 0.0
-            sick_leave = 0.0
-            unpaid_leave = 0.0
-            welfare_leave = 0.0
-            
-            # Calculate normal working days
-            for dt in date_range:
-                day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
-                day_date = dt.date()
-                
-                # Sửa logic: Tính cho ngày làm việc bình thường theo yêu cầu
-                # 1. Là ngày trong tuần (Thứ 2-6) VÀ không phải ngày nghỉ lễ
-                # 2. Là ngày cuối tuần nhưng được quy định là "ngày làm việc đặc biệt"
-                is_normal_workday = (
-                    (day_type == 'Weekday') or  # Ngày trong tuần không phải lễ
-                    (day_type == 'Weekend' and day_date in special_workdays)  # Cuối tuần nhưng là ngày làm việc đặc biệt
-                )
-                
-                if (is_normal_workday and 
-                    not is_lieu_day(emp_name, day_date, ot_lieu_data) and
-                    not has_ot_on_date(emp_name, day_date, ot_lieu_data) and
-                    not has_apply_leave_on_date(emp_name, day_date, apply_data)):
-                    
-                    shift_info = get_shift_info(emp_name, day_date, sign_in_out_data)
-                    if shift_info == 'FULL':
-                        normal_days += 1.0
-                    elif shift_info in ['AM', 'PM']:
-                        normal_days += 0.5
-            
-            # Calculate leave days from apply data
-            if apply_data is not None and not apply_data.empty:
-                # Use ID-based matching for apply data
-                emp_id_from_name = extract_id_from_name(emp_name)
-                if emp_id_from_name:
-                    emp_apply_data = apply_data[
-                        (apply_data['Emp Name'].astype(str).apply(lambda x: extract_id_from_name(x)) == emp_id_from_name) &
-                        (apply_data['Results'] == 'Approved') &
-                        (apply_data['Type'] == 'Leave')
-                    ]
-                else:
-                    emp_apply_data = pd.DataFrame()  # Empty DataFrame if no ID found
-                
-                for _, apply_record in emp_apply_data.iterrows():
-                    try:
-                        start_date_str = apply_record.get('Start Date', '')
-                        end_date_str = apply_record.get('End Date', '')
-                        apply_date_str = apply_record.get('Apply Date', '')
-                        leave_type = apply_record.get('Leave Type', '').lower()
-                        note = apply_record.get('Note', '').lower()
-                        
-                        if start_date_str:
-                            start_date = pd.to_datetime(start_date_str).date()
-                        elif apply_date_str:
-                            start_date = pd.to_datetime(apply_date_str).date()
-                        else:
-                            continue
-                            
-                        end_date = pd.to_datetime(end_date_str).date() if end_date_str else start_date
-                        
-                        # Calculate leave days within date range
-                        for dt in date_range:
-                            day_date = dt.date()
-                            if start_date <= day_date <= end_date:
-                                day_type = get_day_type(dt, holidays, special_weekends, special_workdays)
-                                
-                                if day_type == 'Weekday':
-                                    # Determine if it's half day or full day
-                                    leave_days = 1.0
-                                    if 'morning' in note or 'afternoon' in note:
-                                        leave_days = 0.5
-                                    elif (end_date - start_date).days > 0:
-                                        # Multiple days, check if it's the same day
-                                        if start_date == end_date:
-                                            leave_days = 0.5
-                                    
-                                    # Add to appropriate leave type
-                                    if 'annual' in leave_type:
-                                        annual_leave += leave_days
-                                    elif 'sick' in leave_type:
-                                        sick_leave += leave_days
-                                    elif 'unpaid' in leave_type:
-                                        unpaid_leave += leave_days
-                                    elif 'welfare' in leave_type:
-                                        welfare_leave += leave_days
-                    except:
-                        continue
-            
-            # Calculate total
-            total = normal_days + annual_leave + sick_leave + unpaid_leave + welfare_leave
-            
-            row = {
-                'No': row_no,
-                '14 Digits Employee ID': emp_id,
-                "Employee's name": emp_name,
-                'Group': emp_dept,
-                'Normal working days': round(normal_days, 1),
-                'Annual leave (100% salary)': round(annual_leave, 1),
-                'Sick leave (50% salary)': round(sick_leave, 1),
-                'Unpaid leave (0% salary)': round(unpaid_leave, 1),
-                'Welfare leave (100% salary)': round(welfare_leave, 1),
-                'Total': round(total, 1),
-                'Late/Leave early (mins)': 0,  # Placeholder
-                'Late/Leave early (times)': 0,  # Placeholder
-                'Forget scanning': 0,  # Placeholder
-                'Violation': 0,  # Placeholder
-                'Remark': '',
-                'Attendance for salary payment': round(total, 1)
-            }
-            
-            result_rows.append(row)
-            row_no += 1
-        
-        if not result_rows:
-            return {'columns': [], 'rows': []}
-        
-        result_df = pd.DataFrame(result_rows)
-        cols = list(result_df.columns)
-        rows = result_df.fillna('').astype(str).values.tolist()
-        
-        return {'columns': cols, 'rows': rows}
+        # Return empty data if no response
+        return {'columns': [], 'rows': []}
         
     except Exception as e:
         print(f"Error in calculate_total_attendance_detail_for_export: {e}")
-        import traceback
-        traceback.print_exc()
         return {'columns': [], 'rows': []}
+
 
 def calculate_abnormal_late_early_for_export(month=None, year=None):
     """Calculate Abnormal Late/Early data for export - uses same logic as frontend"""
@@ -3543,40 +3205,17 @@ def calculate_abnormal_late_early_for_export(month=None, year=None):
         if response.status_code == 200:
             data = response.get_json()
             if data and 'abnormal_late_early_columns' in data and 'abnormal_late_early_rows' in data:
-                columns = data['abnormal_late_early_columns']
-                rows = data['abnormal_late_early_rows']
-                
-                if rows:
-                    # Convert to DataFrame
-                    df = pd.DataFrame(rows, columns=columns)
-                    
-                    # Rename columns to match expected export format
-                    column_mapping = {
-                        'Name': 'Employee',
-                        'Attendance Date': 'Date', 
-                        'morning card-swipe': 'SignIn',
-                        'afternoon card-swipe': 'SignOut',
-                        'status': 'Status',
-                        'Unpaid salary due to late come/early leave (mins)': 'TotalViolationMinutes'
-                    }
-                    
-                    # Apply column mapping
-                    for old_col, new_col in column_mapping.items():
-                        if old_col in df.columns:
-                            df = df.rename(columns={old_col: new_col})
-                    
-                    return df
+                return {
+                    'columns': data['abnormal_late_early_columns'],
+                    'rows': data['abnormal_late_early_rows']
+                }
         
-        # Return empty DataFrame if no data
-        return pd.DataFrame()
+        # Return empty data if no response
+        return {'columns': [], 'rows': []}
         
     except Exception as e:
         print(f"Error in calculate_abnormal_late_early_for_export: {e}")
-        return pd.DataFrame()
-        
-    except Exception as e:
-        print(f"Error in calculate_abnormal_late_early_for_export: {e}")
-        return pd.DataFrame()
+        return {'columns': [], 'rows': []}
 
 def calculate_abnormal_missing_for_export(month=None, year=None):
     """Calculate Abnormal Missing data for export"""
