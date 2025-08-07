@@ -202,6 +202,28 @@
             line-height: 25px !important;
         }
         
+        /* Red highlighting for penalty rows ≥30 minutes */
+        #attendanceReportTab .table-responsive tbody tr.penalty-row {
+            background-color: #ffebee !important;
+            border-left: 4px solid #f44336 !important;
+        }
+        
+        #attendanceReportTab .table-responsive tbody tr.penalty-row:hover {
+            background-color: #ffcdd2 !important;
+        }
+        
+        /* Penalty indicator styling */
+        .penalty-indicator {
+            color: #f44336;
+            font-weight: bold;
+            font-size: 10px;
+            margin-left: 2px;
+        }
+        
+        .penalty-minor { color: #ff9800; }  /* Orange for minor penalties */
+        .penalty-major { color: #f44336; }  /* Red for major penalties */
+        
+        
         #attendanceReportTab .table-responsive tbody td {
             height: 25px !important;
             min-height: 25px !important;
@@ -3317,7 +3339,15 @@
                      const end = Math.min(start + pageSize, rows.length);
                      for (let i = start; i < end; i++) {
                          let row = rows[i];
-                         html += `<tr>`;
+                         
+                         // Check for penalty highlighting (TotalLateMinutes ≥ 30)
+                         let rowClass = '';
+                         const totalLateMinutesIdx = columns.indexOf('TotalLateMinutes');
+                         if (totalLateMinutesIdx >= 0 && row[totalLateMinutesIdx] >= 30) {
+                             rowClass = 'penalty-row';
+                         }
+                         
+                         html += `<tr class="${rowClass}">`;
                          
                          // Department và Name (chỉ hiển thị ở dòng đầu tiên của mỗi nhân viên)
                          if (i % 2 === 0) {
@@ -3336,15 +3366,24 @@
                                  
                                  // Logic tô màu dựa trên giá trị từ backend
                                  if (val === 'Miss') {
-                                     cellColor = 'background:#ffcdd2;color:#d32f2f;font-weight:bold;'; // Miss - nền đỏ, chữ đỏ đậm
+                                     cellColor = 'background:#ffcdd2;color:#d32f2f;font-weight:bold;'; // Miss - nền đỏ, không hiển thị chữ
+                                     val = ''; // Không hiển thị chữ "Miss", chỉ tô đỏ
                                  } else if (val === 'Leave') {
                                      cellColor = 'background:#ffe0b2;font-weight:bold;'; // Leave - vàng nhạt
                                  } else if (val === 'Trip') {
                                      cellColor = 'background:#bbdefb;font-weight:bold;'; // Trip - xanh dương nhạt
-                                 } else if (val === 'Supplement') {
+                                 } else if (val === 'Supplement' || val === 'Supp') {
                                      cellColor = 'background:#c5cae9;font-weight:bold;'; // Supplement - tím nhạt
+                                 } else if (val && val.includes('Supp(') && val.includes(')*')) {
+                                     // Supplement with penalty
+                                     cellColor = 'background:#f48fb1;color:#c2185b;font-weight:bold;';
+                                     val += '<span class="penalty-indicator penalty-major">*</span>';
                                  } else if (val === 'Lieu') {
                                      cellColor = 'background:#e1bee7;font-weight:bold;'; // Lieu - hồng nhạt
+                                 } else if (val && val.includes('Lieu*')) {
+                                     // Lieu with penalty
+                                     cellColor = 'background:#f48fb1;color:#c2185b;font-weight:bold;';
+                                     val += '<span class="penalty-indicator penalty-major">*</span>';
                                  } else if (val === 'Late/Soon') {
                                      cellColor = 'background:#fff9c4;color:#d32f2f;font-weight:bold;'; // Late/Soon - nền vàng, chữ đỏ đậm
                                  } else if (val === '') {
@@ -3354,11 +3393,19 @@
                                      cellColor = 'background:#fff9c4;color:#d32f2f;font-weight:bold;'; // Nền vàng, chữ đỏ đậm
                                      val = val.replace('LATE:', ''); // Chỉ hiển thị thời gian
                                  } else if (val && val.startsWith('NORMAL:')) {
-                                     // Normal với thời gian thực tế
+                                     // Normal với thời gian thực tế - chỉ tô xanh lá, không hiển thị giờ
                                      cellColor = 'background:#c8e6c9;font-weight:bold;'; // Nền xanh lá
-                                     val = val.replace('NORMAL:', ''); // Chỉ hiển thị thời gian
+                                     val = ''; // Không hiển thị thời gian, chỉ tô màu
                                  } else if (val === 'Normal') {
                                      cellColor = 'background:#c8e6c9;font-weight:bold;'; // Normal - nền xanh lá
+                                     val = ''; // Không hiển thị chữ "Normal", chỉ tô xanh lá
+                                 } else if (val && (val.includes('*') || val.includes('**'))) {
+                                     // Any status with penalty indicators
+                                     if (val.includes('**')) {
+                                         cellColor = 'background:#f44336;color:#fff;font-weight:bold;'; // Major penalty - red background
+                                     } else if (val.includes('*')) {
+                                         cellColor = 'background:#ff9800;color:#fff;font-weight:bold;'; // Minor penalty - orange background
+                                     }
                                  }
                                  
                                  html += `<td style="text-align:center;${cellColor}" data-col="${columns[d]}">${val || ''}</td>`;
@@ -3810,7 +3857,8 @@
                     yearSel.value = data.current_year;
                 }
                 
-                // Add change event listeners
+                // Add change event listeners - ONLY refresh when user changes month/year
+                // No automatic 5-minute refresh or other periodic updates
                 monthSel.onchange = loadAttendanceReportTable;
                 yearSel.onchange = loadAttendanceReportTable;
                 
@@ -3839,6 +3887,13 @@
         function loadAttendanceReportTable() {
             const month = document.getElementById('attendanceMonth').value;
             const year = document.getElementById('attendanceYear').value;
+            
+            // Prevent unnecessary reloads - check if data is already loaded for this month/year
+            if (window.reportData?.attendanceReport?.month == month && 
+                window.reportData?.attendanceReport?.year == year) {
+                console.log(`Report data already loaded for ${month}/${year}, skipping reload`);
+                return;
+            }
             
             console.log(`Loading attendance report for ${month}/${year}...`);
             

@@ -40,7 +40,7 @@ lieu_followup_df = None
 # Cache for expensive calculations
 _attendance_report_cache = {}
 _total_attendance_cache = {}
-_cache_timeout = 300  # 5 minutes
+_cache_timeout = 0  # Disable caching - always recalculate
 
 def _get_cache_key():
     """Generate cache key based on file modification times"""
@@ -2336,14 +2336,51 @@ def get_attendance_report():
     else:
         return jsonify({'error': 'Không tìm thấy file danh sách nhân viên.'})
 
-    # Pre-aggregate daily attendance data for faster lookup
+    # Pre-aggregate daily attendance data with time constraints
+    def process_daily_attendance_with_constraints(df):
+        """Process attendance with time constraints per specification"""
+        if df.empty:
+            return pd.DataFrame(columns=['NormalizedName', 'Date', 'MorningTime', 'AfternoonTime', 'SignIn', 'SignOut'])
+        
+        result_data = []
+        for (name, date), group in df.groupby(['NormalizedName', 'Date']):
+            times = group['attendance_time'].dropna()
+            
+            # Apply time constraints: 8:00 AM - 6:00 PM working hours
+            valid_times = times[(times.dt.hour >= 8) & (times.dt.hour <= 18)]
+            
+            if valid_times.empty:
+                result_data.append({
+                    'NormalizedName': name, 'Date': date,
+                    'MorningTime': None, 'AfternoonTime': None,
+                    'SignIn': None, 'SignOut': None
+                })
+                continue
+            
+            # Morning shift: Find MIN time, exclude if > 4:00 PM
+            morning_times = valid_times[valid_times.dt.hour < 16]  # Before 4 PM
+            morning_time = morning_times.min() if not morning_times.empty else None
+            
+            # Afternoon shift: Find MAX time, exclude if < 10:30 AM  
+            afternoon_times = valid_times[valid_times.dt.time >= pd.Timestamp('10:30').time()]
+            afternoon_time = afternoon_times.max() if not afternoon_times.empty else None
+            
+            # Overall SignIn/SignOut for work hours calculation
+            sign_in = valid_times.min()
+            sign_out = valid_times.max()
+            
+            result_data.append({
+                'NormalizedName': name, 'Date': date,
+                'MorningTime': morning_time, 'AfternoonTime': afternoon_time,
+                'SignIn': sign_in, 'SignOut': sign_out
+            })
+        
+        return pd.DataFrame(result_data)
+    
     if not df_sign_all.empty:
-        daily_times = df_sign_all.groupby(['NormalizedName', 'Date'])['attendance_time'].agg(
-            SignIn=('min'),
-            SignOut=('max')
-        ).reset_index()
+        daily_times = process_daily_attendance_with_constraints(df_sign_all)
     else:
-        daily_times = pd.DataFrame(columns=['NormalizedName', 'Date', 'SignIn', 'SignOut'])
+        daily_times = pd.DataFrame(columns=['NormalizedName', 'Date', 'MorningTime', 'AfternoonTime', 'SignIn', 'SignOut'])
 
     # Create master dataframe for all employee-day combinations
     master_data = []
@@ -2386,39 +2423,246 @@ def get_attendance_report():
         status, late_minutes = '', 0
 
         if record['DayType'] != 'Weekday' or record['IsLieu']:
-            status = 'Lieu' if record['IsLieu'] else 'Off'
+            if record['IsLieu']:
+                # Advanced lieu processing with morning/afternoon rules
+                lieu_valid = True
+                lieu_penalty = 0
+                lieu_hours = 0
+                
+                try:
+                    # Get lieu timing from OT/Lieu data
+                    lieu_records = ot_lieu_lookup.get(normalized_name, [])
+                    for lieu_record in lieu_records:
+                        lieu_cols = ['Lieu From', 'Lieu To', 'Lieu From 2', 'Lieu To 2']
+                        for i in range(0, len(lieu_cols), 2):
+                            lieu_from_col = lieu_cols[i]
+                            lieu_to_col = lieu_cols[i+1] if i+1 < len(lieu_cols) else None
+                            
+                            if (lieu_from_col in lieu_record and lieu_to_col in lieu_record and
+                                pd.notna(lieu_record[lieu_from_col]) and pd.notna(lieu_record[lieu_to_col])):
+                                
+                                try:
+                                    lieu_from = pd.to_datetime(f"{day_date} {lieu_record[lieu_from_col]}")
+                                    lieu_to = pd.to_datetime(f"{day_date} {lieu_record[lieu_to_col]}")
+                                    
+                                    # Calculate lieu hours
+                                    lieu_duration = (lieu_to - lieu_from).total_seconds() / 3600
+                                    lieu_hours += lieu_duration
+                                    
+                                    # Morning lieu validation: must be ≤ 12:00 PM
+                                    if lieu_from.hour < 12:  # Morning lieu
+                                        if lieu_to.hour > 12:
+                                            lieu_valid = False
+                                            lieu_penalty += 30  # 30 min penalty for morning lieu extending past noon
+                                    
+                                    # Afternoon lieu validation: must be ≥ 1:30 PM
+                                    elif lieu_from.hour >= 13 and lieu_from.minute >= 30:  # Afternoon lieu
+                                        if lieu_from.hour < 13 or (lieu_from.hour == 13 and lieu_from.minute < 30):
+                                            lieu_valid = False
+                                            lieu_penalty += 30  # 30 min penalty for afternoon lieu starting too early
+                                    
+                                except:
+                                    lieu_penalty += 15  # Minor penalty for invalid lieu timing
+                    
+                    # Combined calculation: (work_hours + lieu_hours) must meet daily requirement
+                    work_hours = 0
+                    if pd.notna(record.get('SignIn')) and pd.notna(record.get('SignOut')):
+                        work_seconds = (record['SignOut'] - record['SignIn']).total_seconds()
+                        # Subtract lunch if work spans lunch period
+                        lunch_start = record['SignIn'].replace(hour=12, minute=0, second=0)
+                        lunch_end = record['SignIn'].replace(hour=13, minute=30, second=0)
+                        if record['SignIn'] < lunch_end and record['SignOut'] > lunch_start:
+                            work_seconds -= 1.5 * 3600
+                        work_hours = work_seconds / 3600
+                    
+                    total_hours = work_hours + lieu_hours
+                    required_hours = 8.0
+                    
+                    if total_hours < required_hours:
+                        # Insufficient hours with lieu - calculate penalty
+                        shortage = required_hours - total_hours
+                        lieu_penalty += int(shortage * 60)  # 1 min penalty per minute short
+                    
+                    status = 'Lieu'
+                    late_minutes = lieu_penalty
+                    
+                except Exception as e:
+                    status = 'Lieu'
+                    late_minutes = 45  # Standard penalty for lieu processing errors
+            else:
+                status = 'Off'
+                late_minutes = 0
         elif record['ApplyInfo'] and record['ApplyInfo']['is_approved']:
             apply_type = record['ApplyInfo']['type']
-            if apply_type == 'Supplement':
-                if pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
-                    status = 'Supplement'
-                elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
-                    status = 'Supplement'
-                else:
-                    status = 'Normal'
-            else:
+            apply_info = record['ApplyInfo']
+            
+            # Complex supplement validation with specific time checks
+            if apply_type == 'Supp':
+                supplement_valid = True
+                penalty_reasons = []
+                
+                # Get supplement timing from apply data
+                try:
+                    # Extract supplement start/end times from apply record
+                    supp_start_str = apply_info.get('start_time', '')
+                    supp_end_str = apply_info.get('end_time', '')
+                    
+                    if supp_start_str and supp_end_str:
+                        # Parse supplement times
+                        supp_start = pd.to_datetime(f"{day_date} {supp_start_str}")
+                        supp_end = pd.to_datetime(f"{day_date} {supp_end_str}")
+                        
+                        # Morning supplement validation: supplement_start ≤ (date + 9h30m1s)
+                        morning_cutoff = pd.to_datetime(f"{day_date} 09:30:01")
+                        # Afternoon supplement validation: (date + 17h29m59s) ≤ supplement_end  
+                        afternoon_cutoff = pd.to_datetime(f"{day_date} 17:29:59")
+                        
+                        # Check morning shift supplement timing
+                        if record.get('MorningTime'):
+                            if supp_start > morning_cutoff:
+                                supplement_valid = False
+                                penalty_reasons.append("Morning supplement starts too late (after 9:30:01)")
+                        
+                        # Check afternoon shift supplement timing
+                        if record.get('AfternoonTime'):
+                            if supp_end < afternoon_cutoff:
+                                supplement_valid = False
+                                penalty_reasons.append("Afternoon supplement ends too early (before 17:29:59)")
+                        
+                        # Time error calculation for wrong supplement timing
+                        if not supplement_valid:
+                            status = 'Supp'  # Still show as Supp but with penalty
+                            # Calculate penalty based on time violations
+                            penalty_minutes = 0
+                            if supp_start > morning_cutoff:
+                                penalty_minutes += int((supp_start - morning_cutoff).total_seconds() / 60)
+                            if supp_end < afternoon_cutoff:
+                                penalty_minutes += int((afternoon_cutoff - supp_end).total_seconds() / 60)
+                            late_minutes = penalty_minutes
+                        else:
+                            status = 'Supp'
+                            late_minutes = 0
+                    else:
+                        # No supplement timing provided - default penalty
+                        status = 'Supp'
+                        late_minutes = 60  # 1 hour penalty for missing supplement timing
+                        penalty_reasons.append("Missing supplement timing information")
+                        
+                except Exception as e:
+                    # Error parsing supplement data - penalty
+                    status = 'Supp'
+                    late_minutes = 30  # 30 min penalty for invalid supplement data
+                    penalty_reasons.append("Invalid supplement timing format")
+                    
+            elif apply_type in ['Trip']:
                 status = apply_type
+                late_minutes = 0
+            elif apply_type == 'Leave':
+                # Leave processing - only count on weekdays, exclude weekends and holidays
+                if record['DayType'] == 'Weekday':
+                    status = 'Leave'
+                    late_minutes = 0
+                else:
+                    # Leave on non-weekday - check for timing errors
+                    status = 'Leave'
+                    late_minutes = 15  # Minor penalty for leave on non-workday
+            else:
+                status = apply_type if apply_type else 'Normal'
+                late_minutes = 0
         elif pd.isna(record.get('SignIn')) and pd.isna(record.get('SignOut')):
             status = 'Miss'
         elif pd.isna(record.get('SignIn')) or pd.isna(record.get('SignOut')):
             status = 'Miss'
         else:
-            status = 'Normal'
+            # Complex working hours calculation with lunch break logic
             check_in_time, check_out_time = record['SignIn'], record['SignOut']
             
             if pd.notna(check_in_time) and pd.notna(check_out_time):
+                # Calculate total work seconds
                 work_seconds = (check_out_time - check_in_time).total_seconds()
                 
+                # Advanced lunch break logic
                 lunch_start = check_in_time.replace(hour=12, minute=0, second=0)
                 lunch_end = check_in_time.replace(hour=13, minute=30, second=0)
-                if check_in_time < lunch_end and check_out_time > lunch_start:
-                    work_seconds -= 1.5 * 3600
-
-                work_hours = work_seconds / 3600
                 
-                if work_hours < 8.0:
-                    late_minutes = int((8.0 - work_hours) * 60)
+                # Check if work spans lunch period
+                spans_lunch = check_in_time < lunch_end and check_out_time > lunch_start
+                
+                if spans_lunch:
+                    # With lunch break: Require 9.5 hours total (8 work + 1.5 lunch)
+                    work_seconds -= 1.5 * 3600  # Subtract lunch break
+                    required_hours = 8.0
+                    total_required_seconds = 9.5 * 3600  # Including lunch
+                else:
+                    # Without lunch break: Require 8 hours
+                    required_hours = 8.0
+                    total_required_seconds = 8.0 * 3600
+                
+                work_hours = work_seconds / 3600
+                total_hours = (check_out_time - check_in_time).total_seconds() / 3600
+                
+                # Validate time range with flexible late arrival compensation
+                standard_start = check_in_time.replace(hour=8, minute=0, second=0)
+                late_arrival_cutoff = check_in_time.replace(hour=8, minute=30, second=0)
+                standard_end_time = check_in_time.replace(hour=18, minute=0, second=0)
+                
+                # Check for late arrival within acceptable range (8:00-8:30)
+                late_arrival_minutes = 0
+                max_allowed_checkout = standard_end_time
+                
+                if check_in_time > standard_start and check_in_time <= late_arrival_cutoff:
+                    late_arrival_minutes = int((check_in_time - standard_start).total_seconds() / 60)
+                    # Allow extended checkout time for late arrival compensation
+                    max_allowed_checkout = standard_end_time + pd.Timedelta(minutes=late_arrival_minutes)
+                
+                time_range_valid = (
+                    check_in_time.hour >= 8 and 
+                    check_out_time <= max_allowed_checkout
+                )
+                
+                if not time_range_valid:
+                    # Time outside valid range - penalty calculation
+                    penalty_reason = []
+                    if check_in_time.hour < 8:
+                        penalty_reason.append("Early arrival before 8:00 AM")
+                    if check_out_time > max_allowed_checkout:
+                        if late_arrival_minutes > 0:
+                            penalty_reason.append(f"Late departure beyond compensation limit (max allowed: {max_allowed_checkout.strftime('%H:%M')})")
+                        else:
+                            penalty_reason.append("Late departure after 6:00 PM")
+                    
+                    # Apply penalty for invalid time range
                     status = 'Late/Soon'
+                    late_minutes = 30  # Standard penalty for time range violation
+                else:
+                    # Normal time range - check if sufficient hours with flexible late arrival compensation
+                    standard_work_start = check_in_time.replace(hour=8, minute=0, second=0)
+                    standard_work_end = check_in_time.replace(hour=17, minute=30, second=0)
+                    
+                    # Check for late arrival within acceptable range (8:00-8:30)
+                    if check_in_time > standard_work_start and check_in_time <= late_arrival_cutoff:
+                        # Late arrival compensation logic
+                        required_end_time = standard_work_end + pd.Timedelta(minutes=late_arrival_minutes)
+                        
+                        # Check if checkout time compensates for late arrival
+                        if check_out_time >= required_end_time:
+                            # Late arrival but compensated with extended work - valid
+                            status = 'Normal'
+                            late_minutes = 0
+                        else:
+                            # Late arrival not fully compensated
+                            shortage_minutes = int((required_end_time - check_out_time).total_seconds() / 60)
+                            status = 'Late/Soon'
+                            late_minutes = shortage_minutes
+                    else:
+                        # Standard check for sufficient work hours (no late arrival or outside 8:00-8:30)
+                        if work_hours < required_hours:
+                            shortage_hours = required_hours - work_hours
+                            late_minutes = int(shortage_hours * 60)
+                            status = 'Late/Soon'
+                        else:
+                            status = 'Normal'
+                            late_minutes = 0
                     
                     abnormal_report_data.append({
                         'Department': record.get('Dept', ''), 'Name': emp_name, 'Date': day_date,
@@ -2434,7 +2678,7 @@ def get_attendance_report():
 
     # Build result table
     result_rows = []
-    summary_keys = ['Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'Supplement', 'TotalLateMinutes']
+    summary_keys = ['Normal', 'Leave', 'Trip', 'Miss', 'Late/Soon', 'Lieu', 'Supp', 'TotalLateMinutes']
 
     for _, emp in emp_df.iterrows():
         emp_name_display = emp['DisplayName']
@@ -2454,7 +2698,8 @@ def get_attendance_report():
                 record = day_record_df.iloc[0]
                 status = record['Status']
                 
-                if status in ['Trip', 'Leave', 'Supplement', 'Miss']:
+                if status in ['Trip', 'Leave', 'Supp', 'Miss']:
+                    # Status is already "Supp" from apply data, no need to convert
                     morning_row[day_str], afternoon_row[day_str] = status, status
                     summary[status] += 0.5
                 elif status == 'Lieu':
@@ -2478,6 +2723,11 @@ def get_attendance_report():
                 summary['TotalLateMinutes'] += record['LateMinutes']
 
         morning_row.update(summary)
+        afternoon_row.update(summary)
+        
+        # Add penalty tracking to afternoon row
+        afternoon_row['TotalPenalty'] = summary['TotalLateMinutes']
+        afternoon_row['HasRedHighlight'] = summary['TotalLateMinutes'] >= 30
         
         result_rows.append(morning_row)
         result_rows.append(afternoon_row)
