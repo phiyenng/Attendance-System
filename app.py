@@ -36,10 +36,10 @@ rules = None
 global lieu_followup_df
 lieu_followup_df = None
 
-# Cache for expensive calculations - OPTIMIZED
+# Cache for expensive calculations
 _attendance_report_cache = {}
 _total_attendance_cache = {}
-_cache_timeout = 300  # Cache for 5 minutes to improve performance
+_cache_timeout = 300  # 5 min
 
 # Memory optimization settings
 pd.set_option('mode.copy_on_write', True)  # Reduce memory usage in pandas operations
@@ -137,11 +137,30 @@ def translate_apply_headers(df):
     return df
 
 def filter_apply_employees(df, emp_list):
-    if 'Emp Name' not in df.columns:
+    # Accept by name and/or ID when available
+    if emp_list is None or emp_list.empty:
         return df
     emp_list = emp_list.copy()
-    valid_names = set(emp_list['Name'].astype(str))
-    return df[df['Emp Name'].astype(str).isin(valid_names)]
+    emp_list['Name'] = emp_list['Name'].astype(str)
+    if 'ID Number' in emp_list.columns:
+        emp_list['ID Number'] = emp_list['ID Number'].astype(str)
+
+    valid_names = set(emp_list['Name'])
+    valid_ids = set(emp_list['ID Number']) if 'ID Number' in emp_list.columns else set()
+
+    # If neither Emp Name nor Emp ID present, nothing to filter
+    if 'Emp Name' not in df.columns and 'Emp ID' not in df.columns:
+        return df
+
+    name_match = pd.Series([False] * len(df))
+    id_match = pd.Series([False] * len(df))
+
+    if 'Emp Name' in df.columns:
+        name_match = df['Emp Name'].astype(str).isin(valid_names)
+    if 'Emp ID' in df.columns and len(valid_ids) > 0:
+        id_match = df['Emp ID'].astype(str).isin(valid_ids)
+
+    return df[name_match | id_match]
 
 def add_apply_columns(df):
     # Type
@@ -223,6 +242,178 @@ def add_apply_columns(df):
     else:
         df['Leave Type'] = ''
     return df
+
+# =======================
+# SUPPORT APPLY TRANSFORM
+# =======================
+def transform_support_apply_df(df, employee_list_df):
+    """Transform Support team's apply file into standard apply format.
+
+    Expected input columns (case-sensitive as commonly provided):
+      - Title (e.g., "May ... Attendance Correction_@Dao Thi Thanh Thuy、6534000158、2025-05-08")
+      - Abnormal Day (e.g., 2025-01-01)
+      - From Note (e.g., "12AM is the midnight")
+      - To (end time, e.g., "17:30" or "5:30 PM")
+      - Status (maps to Application Type)
+      - Reason (maps to Note)
+    """
+    try:
+        df = df.copy()
+
+        # Preserve original status (might contain approval info)
+        original_status_series = df['Status'] if 'Status' in df.columns else None
+
+        # Normalize/rename straightforward columns
+        rename_map = {}
+        if 'Status' in df.columns:
+            rename_map['Status'] = 'Application Type'
+        if 'Reason' in df.columns:
+            rename_map['Reason'] = 'Note'
+        df = df.rename(columns=rename_map)
+
+        # Helpers
+        def parse_time_from_text(text):
+            if pd.isna(text):
+                return '00:00'
+            s = str(text).strip()
+            # Common phrases
+            if '12am' in s.lower():
+                return '00:00'
+            if '12pm' in s.lower():
+                return '12:00'
+            # AM/PM like 9:30 AM or 9 AM
+            m = re.search(r'(0?[1-9]|1[0-2])\s*[:.]\s*([0-5][0-9])\s*(AM|PM)', s, re.I)
+            if m:
+                hour = int(m.group(1))
+                minute = int(m.group(2))
+                ampm = m.group(3).upper()
+                if ampm == 'PM' and hour != 12:
+                    hour += 12
+                if ampm == 'AM' and hour == 12:
+                    hour = 0
+                return f"{hour:02d}:{minute:02d}"
+            m = re.search(r'(0?[1-9]|1[0-2])\s*(AM|PM)', s, re.I)
+            if m:
+                hour = int(m.group(1))
+                ampm = m.group(2).upper()
+                if ampm == 'PM' and hour != 12:
+                    hour += 12
+                if ampm == 'AM' and hour == 12:
+                    hour = 0
+                return f"{hour:02d}:00"
+            # 24h format 14:30 or 9:05
+            m = re.search(r'\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\b', s)
+            if m:
+                hour = int(m.group(1))
+                minute = int(m.group(2))
+                return f"{hour:02d}:{minute:02d}"
+            return '00:00'
+
+        def extract_name_id_from_title(title_val):
+            name_guess, emp_id_guess = None, None
+            if pd.isna(title_val):
+                return name_guess, emp_id_guess
+            t = str(title_val)
+            # Pattern like _@Name、12345678、
+            m = re.search(r'@\s*([^、,]+)[、,]\s*(\d{7,12})', t)
+            if m:
+                return m.group(1).strip(), m.group(2)
+            # Any 7-12 digit id
+            m_id = re.search(r'(\d{7,12})', t)
+            if m_id:
+                emp_id_guess = m_id.group(1)
+            # Try to take name between last '_' and the delimiter
+            m_name = re.search(r'_(?:@)?\s*([^、,]+)', t)
+            if m_name:
+                name_guess = m_name.group(1).strip()
+            return name_guess, emp_id_guess
+
+        # Build normalized view of employee list for matching
+        emp_df = employee_list_df.copy() if employee_list_df is not None else pd.DataFrame(columns=['Name','ID Number'])
+        if not emp_df.empty:
+            emp_df['NameStripped'] = emp_df['Name'].astype(str).str.replace(r'\d{7,}', '', regex=True).str.strip().str.lower()
+            emp_df['ID Number'] = emp_df['ID Number'].astype(str)
+
+        emp_names, emp_ids = [], []
+        apply_dates, start_dates, end_dates = [], [], []
+
+        for _, row in df.iterrows():
+            # Title → Emp ID, Emp Name
+            name_guess, id_guess = extract_name_id_from_title(row.get('Title', ''))
+            chosen_name, chosen_id = '', ''
+            if not emp_df.empty:
+                match_row = None
+                if id_guess:
+                    # Try exact ID, then endswith
+                    m = emp_df[emp_df['ID Number'] == id_guess]
+                    if m.empty:
+                        m = emp_df[emp_df['ID Number'].astype(str).str.endswith(str(id_guess))]
+                    if not m.empty:
+                        match_row = m.iloc[0]
+                if match_row is None and name_guess:
+                    norm_name = str(name_guess).replace('_',' ').strip().lower()
+                    # Try stripped-name match
+                    m = emp_df[emp_df['NameStripped'] == norm_name]
+                    if m.empty:
+                        m = emp_df[emp_df['Name'].astype(str).str.contains(re.escape(name_guess), case=False, na=False)]
+                    if not m.empty:
+                        match_row = m.iloc[0]
+                if match_row is not None:
+                    chosen_name = match_row['Name']
+                    chosen_id = match_row.get('ID Number', '')
+                else:
+                    chosen_name = name_guess or ''
+                    chosen_id = id_guess or ''
+            else:
+                chosen_name = name_guess or ''
+                chosen_id = id_guess or ''
+            emp_names.append(chosen_name)
+            emp_ids.append(chosen_id)
+
+            # Abnormal Day → Apply Date
+            abnormal_day = row.get('Abnormal Day', '')
+            try:
+                day_dt = pd.to_datetime(abnormal_day)
+                day_str = day_dt.strftime('%Y-%m-%d')
+            except Exception:
+                day_str = str(abnormal_day)
+            apply_dates.append(day_str)
+
+            # Start Date: Abnormal Day + time from From Note
+            from_note = row.get('From Note', '')
+            start_time = parse_time_from_text(from_note)
+            start_dates.append(f"{day_str} {start_time}".strip())
+
+            # End Date: Abnormal Day + time from To
+            to_val = row.get('To', '')
+            end_time = parse_time_from_text(to_val)
+            end_dates.append(f"{day_str} {end_time}".strip())
+
+        df['Emp ID'] = emp_ids
+        df['Emp Name'] = emp_names
+        if 'Name' not in df.columns:
+            df['Name'] = df['Emp Name']
+        df['Apply Date'] = apply_dates
+        df['Start Date'] = start_dates
+        df['End Date'] = end_dates
+
+        # Carry approval-like info forward so standard mapping can set Results
+        if 'Approve Result' not in df.columns and original_status_series is not None:
+            try:
+                df['Approve Result'] = original_status_series
+            except Exception:
+                df['Approve Result'] = ''
+
+        # Keep only relevant standard columns plus originals
+        std_cols = ['Emp ID', 'Emp Name', 'Apply Date', 'Start Date', 'End Date', 'Application Type', 'Note']
+        # Ensure presence
+        for c in std_cols:
+            if c not in df.columns:
+                df[c] = ''
+        return df
+    except Exception as e:
+        print(f"Error transforming support apply file: {e}")
+        return df
 
 # =======================
 # OT & LIEU
@@ -539,6 +730,9 @@ def import_apply():
                     return jsonify({'error': f'Cannot read .xls file. Please convert to .xlsx format. Error: {str(e)}'}), 400
         else:
             df = pd.read_excel(file_path)
+        # Transform for support files
+        if 'support' in filename.lower() or 'suport' in filename.lower():
+            df = transform_support_apply_df(df, employee_list_df)
         df = translate_apply_headers(df)
         df = filter_apply_employees(df, employee_list_df)
         df = add_apply_columns(df)
@@ -807,6 +1001,9 @@ def import_with_sheet():
         if data_type == 'signinout':
             sign_in_out_data = df
         elif data_type == 'apply':
+            # Transform for support files (use filename)
+            if 'support' in filename.lower() or 'suport' in filename.lower():
+                df = transform_support_apply_df(df, employee_list_df)
             df = translate_apply_headers(df)
             df = filter_apply_employees(df, employee_list_df)
             df = add_apply_columns(df)
@@ -2853,6 +3050,8 @@ def import_multiple_files():
                 total_rows = len(sign_in_out_data)
                 
             elif data_type == 'apply':
+                if 'support' in filename.lower() or 'suport' in filename.lower():
+                    df = transform_support_apply_df(df, employee_list_df)
                 df = translate_apply_headers(df)
                 df = filter_apply_employees(df, employee_list_df)
                 df = add_apply_columns(df)
