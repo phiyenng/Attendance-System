@@ -247,16 +247,7 @@ def add_apply_columns(df):
 # SUPPORT APPLY TRANSFORM
 # =======================
 def transform_support_apply_df(df, employee_list_df):
-    """Transform Support team's apply file into standard apply format.
-
-    Expected input columns (case-sensitive as commonly provided):
-      - Title (e.g., "May ... Attendance Correction_@Dao Thi Thanh Thuy、6534000158、2025-05-08")
-      - Abnormal Day (e.g., 2025-01-01)
-      - From Note (e.g., "12AM is the midnight")
-      - To (end time, e.g., "17:30" or "5:30 PM")
-      - Status (maps to Application Type)
-      - Reason (maps to Note)
-    """
+    """Transform Support team's apply file into standard apply format."""
     try:
         df = df.copy()
 
@@ -397,19 +388,24 @@ def transform_support_apply_df(df, employee_list_df):
         df['Start Date'] = start_dates
         df['End Date'] = end_dates
 
-        # Carry approval-like info forward so standard mapping can set Results
-        if 'Approve Result' not in df.columns and original_status_series is not None:
-            try:
-                df['Approve Result'] = original_status_series
-            except Exception:
-                df['Approve Result'] = ''
+        # Define standard columns that should be kept
+        std_cols = [
+            'Emp ID', 'Emp Name', 'Submit ID', 'Submit Name', 
+            'Apply Date', 'Start Date', 'End Date', 'Application Type', 
+            'Note', 'Approve Result', 'Type', 'Results', 'Leave Type'
+        ]
+        
+        # Initialize missing columns with empty values
+        for col in std_cols:
+            if col not in df.columns:
+                df[col] = ''
+        # Keep only the standard columns, drop all others
+        df = df[std_cols]
 
-        # Keep only relevant standard columns plus originals
-        std_cols = ['Emp ID', 'Emp Name', 'Apply Date', 'Start Date', 'End Date', 'Application Type', 'Note']
-        # Ensure presence
-        for c in std_cols:
-            if c not in df.columns:
-                df[c] = ''
+        df = df[~df[['Application Type','Note','Approve Result']]
+        .apply(lambda col: col.astype(str).str.strip().replace("nan","").isin(["","Please choose"]))
+        .all(axis=1)]
+
         return df
     except Exception as e:
         print(f"Error transforming support apply file: {e}")
