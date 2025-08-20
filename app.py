@@ -1035,6 +1035,25 @@ def employee_list():
     html += '</tbody></table>'
     return Markup(html)
 
+@app.route('/employee_list_json', methods=['GET'])
+def employee_list_json():
+    """Return employee list as JSON for department filter"""
+    global employee_list_df
+    if employee_list_df is None or employee_list_df.empty:
+        return jsonify({'data': []})
+    
+    # Convert to list of dictionaries
+    data = []
+    for _, row in employee_list_df.iterrows():
+        data.append({
+            'Name': str(row.get('Name', '')),
+            'ID Number': str(row.get('ID Number', '')),
+            'Dept': str(row.get('Dept', '')),
+            'Internship': str(row.get('Internship', ''))
+        })
+    
+    return jsonify({'data': data})
+
 @app.route('/employee_list_filtered', methods=['GET'])
 def employee_list_filtered():
     global employee_list_df

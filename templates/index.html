@@ -991,36 +991,31 @@
                         </div>
                     </div>
                 </div>
-                <!-- Date Range Filter Section -->
+                <!-- Department Filter Section -->
                 <div class="mb-3 p-3 filter-section">
-                    <h6 class="mb-2"><i class="fas fa-calendar-alt"></i> Calculation Date Range</h6>
+                    <h6 class="mb-2"><i class="fas fa-building"></i> Department Filter</h6>
                     <div class="d-flex flex-wrap gap-3 align-items-end">
                         <div>
-                            <label for="dataStartDate" class="form-label small mb-1">Start Date:</label>
-                            <input type="date" id="dataStartDate" class="form-control form-control-sm" style="width:140px;">
+                            <label for="departmentFilter" class="form-label small mb-1">Department:</label>
+                            <select id="departmentFilter" class="form-control form-control-sm" style="width:160px;" onchange="filterByDepartment()">
+                                <option value="">All Departments</option>
+                            </select>
                         </div>
                         <div>
-                            <label for="dataEndDate" class="form-label small mb-1">End Date:</label>
-                            <input type="date" id="dataEndDate" class="form-control form-control-sm" style="width:140px;">
-                        </div>
-                        <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="setDefaultDateRange()">
-                                <i class="fas fa-calendar-week"></i> Set Default Range
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="clearDateRange()">
-                                <i class="fas fa-times"></i> Clear
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearDepartmentFilter()">
+                                <i class="fas fa-times"></i> Clear Filter
                             </button>
                         </div>
                     </div>
                     <div class="mt-2">
                         <small class="text-muted">
                             <i class="fas fa-info-circle"></i> 
-                            Default range: 19th of previous month to 20th of current month
+                            Filter data by employee department
                         </small>
-                        <div id="dateRangeStatus" class="mt-1" style="display:none;">
+                        <div id="departmentFilterStatus" class="mt-1" style="display:none;">
                             <small class="text-info">
-                                <i class="fas fa-calendar-check"></i> 
-                                <span id="currentDateRange"></span>
+                                <i class="fas fa-filter"></i> 
+                                <span id="currentDepartmentFilter"></span>
                             </small>
                         </div>
                     </div>
@@ -1865,78 +1860,155 @@
                 clearEmployeeFilter();
             }
             if(sectionId==='rulesSection') loadRulesTable();
-            if(sectionId==='mainSection') initializeDateRange();
+            if(sectionId==='mainSection') {
+                // Initialize department filter when switching to main section
+                setTimeout(() => {
+                    initializeDepartmentFilter();
+                }, 100);
+            }
         }
         
         // Default to Main
         showSection('mainSection');
 
-        // Date Range Functions for Data Tab
-        function setDefaultDateRange() {
-            const today = new Date();
-            let startDate, endDate;
+        // Department Filter Functions for Data Tab
+        let departmentFilterData = {
+            signinout: { original: null, filtered: null },
+            apply: { original: null, filtered: null },
+            otlieu: { original: null, filtered: null }
+        };
+
+        function initializeDepartmentFilter() {
+            // Load departments from employee list
+            fetch('/employee_list_json')
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.data && data.data.length > 0) {
+                        // Cache the employee list for filtering
+                        window.cachedEmployeeList = data;
+                        
+                        const departments = [...new Set(data.data.map(row => row.Dept).filter(dept => dept && dept.trim()))];
+                        const select = document.getElementById('departmentFilter');
+                        
+                        // Clear existing options except "All Departments"
+                        while (select.children.length > 1) {
+                            select.removeChild(select.lastChild);
+                        }
+                        
+                        // Add department options
+                        departments.sort().forEach(dept => {
+                            const option = document.createElement('option');
+                            option.value = dept;
+                            option.textContent = dept;
+                            select.appendChild(option);
+                        });
+                    }
+                })
+                .catch(error => console.error('Error loading departments:', error));
+        }
+
+        function filterByDepartment() {
+            const selectedDept = document.getElementById('departmentFilter').value;
             
-            if (today.getDate() >= 20) {
-                // Nếu hôm nay từ ngày 20 trở đi, tính từ 20 tháng trước đến 19 tháng này
-                startDate = new Date(today.getFullYear(), today.getMonth() - 1, 20);
-                endDate = new Date(today.getFullYear(), today.getMonth(), 19);
+            if (!selectedDept) {
+                // Show all data
+                departmentFilterData.signinout.filtered = departmentFilterData.signinout.original;
+                departmentFilterData.apply.filtered = departmentFilterData.apply.original;
+                departmentFilterData.otlieu.filtered = departmentFilterData.otlieu.original;
             } else {
-                // Nếu hôm nay trước ngày 20, tính từ 20 tháng trước đến 19 tháng trước
-                startDate = new Date(today.getFullYear(), today.getMonth() - 2, 20);
-                endDate = new Date(today.getFullYear(), today.getMonth() - 1, 19);
+                // Filter data by department
+                departmentFilterData.signinout.filtered = filterDataByDepartment(departmentFilterData.signinout.original, selectedDept);
+                departmentFilterData.apply.filtered = filterDataByDepartment(departmentFilterData.apply.original, selectedDept);
+                departmentFilterData.otlieu.filtered = filterDataByDepartment(departmentFilterData.otlieu.original, selectedDept);
             }
             
-            document.getElementById('dataStartDate').value = startDate.toISOString().split('T')[0];
-            document.getElementById('dataEndDate').value = endDate.toISOString().split('T')[0];
-            
-            updateDateRangeStatus();
+            // Re-render current tab with filtered data
+            renderActiveDataTable();
+            updateDepartmentFilterStatus();
         }
 
-        function clearDateRange() {
-            document.getElementById('dataStartDate').value = '';
-            document.getElementById('dataEndDate').value = '';
-            updateDateRangeStatus();
-        }
+        function filterDataByDepartment(data, department) {
+            if (!data || !data.data || !data.columns) return data;
 
-        function getDateRange() {
-            const startDate = document.getElementById('dataStartDate').value;
-            const endDate = document.getElementById('dataEndDate').value;
-            return { startDate, endDate };
-        }
+            // Identify potential name/id columns in the dataset
+            const possibleNameCols = ['Name', 'Emp Name', 'emp_name', 'Employee Name', "Employee's name"];            
+            const possibleIdCols = ['Emp ID', 'Employee ID', 'ID Number', 'emp_id'];
 
-        function validateDateRange() {
-            const startDate = document.getElementById('dataStartDate').value;
-            const endDate = document.getElementById('dataEndDate').value;
-            
-            if (startDate && endDate && startDate > endDate) {
-                showAlert('danger', 'Start date cannot be later than end date!');
+            const nameColIndices = data.columns
+                .map((c, i) => ({ c, i }))
+                .filter(o => possibleNameCols.some(x => x.toLowerCase() === String(o.c).toLowerCase()))
+                .map(o => o.i);
+
+            const idColIndices = data.columns
+                .map((c, i) => ({ c, i }))
+                .filter(o => possibleIdCols.some(x => x.toLowerCase() === String(o.c).toLowerCase()))
+                .map(o => o.i);
+
+            if (nameColIndices.length === 0 && idColIndices.length === 0) return data;
+
+            // Build fast lookup for department employees
+            const deptEmployees = getEmployeesByDepartment(department);
+            const norm = s => String(s || '').replace(/\d{7,}/g, '').trim().toLowerCase();
+            const empNameSet = new Set(deptEmployees.map(e => norm(e.Name)));
+            const empIdSet = new Set(deptEmployees.map(e => String(e['ID Number'] || '').trim()));
+
+            const rowMatches = (row) => {
+                // Check by normalized name from any name column
+                if (nameColIndices.some(idx => empNameSet.has(norm(row[idx])))) return true;
+                // Check by exact ID from any id column
+                if (idColIndices.some(idx => empIdSet.has(String(row[idx] || '').trim()))) return true;
+                // Some sources embed ID at end of name; try to extract trailing digits
+                if (nameColIndices.length > 0) {
+                    const hasEmbeddedId = nameColIndices.some(idx => {
+                        const m = String(row[idx] || '').match(/(\d{7,})$/);
+                        return m && empIdSet.has(m[1]);
+                    });
+                    if (hasEmbeddedId) return true;
+                }
                 return false;
-            }
-            return true;
+            };
+
+            const filteredRows = data.data.filter(row => rowMatches(row));
+
+            return { ...data, data: filteredRows };
         }
 
-        // Auto-set default date range when switching to main section
-        function initializeDateRange() {
-            if (document.getElementById('dataStartDate') && !document.getElementById('dataStartDate').value) {
-                setDefaultDateRange();
+        function getEmployeesByDepartment(department) {
+            // Get employees from the cached employee list
+            if (window.cachedEmployeeList && window.cachedEmployeeList.data) {
+                return window.cachedEmployeeList.data.filter(emp => String(emp.Dept || '').trim() === String(department || '').trim());
             }
-            updateDateRangeStatus();
+            return [];
         }
 
-        function updateDateRangeStatus() {
-            const startDate = document.getElementById('dataStartDate').value;
-            const endDate = document.getElementById('dataEndDate').value;
-            const statusDiv = document.getElementById('dateRangeStatus');
-            const statusText = document.getElementById('currentDateRange');
+        function clearDepartmentFilter() {
+            document.getElementById('departmentFilter').value = '';
+            filterByDepartment();
+        }
+
+        function updateDepartmentFilterStatus() {
+            const selectedDept = document.getElementById('departmentFilter').value;
+            const statusDiv = document.getElementById('departmentFilterStatus');
+            const statusText = document.getElementById('currentDepartmentFilter');
             
-            if (startDate && endDate) {
+            if (selectedDept) {
                 statusDiv.style.display = 'block';
-                statusText.textContent = `Current range: ${startDate} to ${endDate}`;
-            } else if (startDate || endDate) {
-                statusDiv.style.display = 'block';
-                statusText.textContent = `Partial range: ${startDate || 'Not set'} to ${endDate || 'Not set'}`;
+                statusText.textContent = `Filtering by: ${selectedDept}`;
             } else {
                 statusDiv.style.display = 'none';
+            }
+        }
+
+        function syncFilteredDataToOriginal() {
+            // Sync filtered data back to original data to maintain consistency
+            if (departmentFilterData.signinout.filtered) {
+                departmentFilterData.signinout.original = JSON.parse(JSON.stringify(departmentFilterData.signinout.filtered));
+            }
+            if (departmentFilterData.apply.filtered) {
+                departmentFilterData.apply.original = JSON.parse(JSON.stringify(departmentFilterData.apply.filtered));
+            }
+            if (departmentFilterData.otlieu.filtered) {
+                departmentFilterData.otlieu.original = JSON.parse(JSON.stringify(departmentFilterData.otlieu.filtered));
             }
         }
 
@@ -1952,12 +2024,6 @@
                 delete window.reportData.abnormal_missing;
             }
             
-            // Validate date range
-            if (!validateDateRange()) {
-                showLoading(false);
-                return;
-            }
-            
             // Just load and cache the data tables directly
             Promise.all([
                 fetch('/get_signinout_data').then(res=>res.json()),
@@ -1968,6 +2034,18 @@
                 cachedTables.signinout = signinout;
                 cachedTables.apply = apply;
                 cachedTables.otlieu = otlieu;
+                
+                // Initialize department filter data
+                departmentFilterData.signinout.original = signinout;
+                departmentFilterData.signinout.filtered = signinout;
+                departmentFilterData.apply.original = apply;
+                departmentFilterData.apply.filtered = apply;
+                departmentFilterData.otlieu.original = otlieu;
+                departmentFilterData.otlieu.filtered = otlieu;
+                
+                // Initialize department filter dropdown
+                initializeDepartmentFilter();
+                
                 document.getElementById('dataTableSwitcherSection').style.display = '';
                 document.getElementById('reportBtn').style.display = '';
                 // Render the first tab (Sign In/Out) by default
@@ -1994,17 +2072,49 @@
                     });
                 }
             });
+            
+            // Initialize department filter on page load
+            // Small delay to ensure DOM is fully loaded
+            setTimeout(() => {
+                initializeDepartmentFilter();
+            }, 100);
+            
+            // Also try to initialize department filter when switching to main section
+            // in case employee list is already loaded
+            if (document.getElementById('mainSection').style.display !== 'none') {
+                setTimeout(() => {
+                    initializeDepartmentFilter();
+                }, 200);
+            }
+            
+            // Try to load employee list data for department filter if not already loaded
+            setTimeout(() => {
+                if (!window.cachedEmployeeList) {
+                    fetch('/employee_list_json')
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data && data.data && data.data.length > 0) {
+                                window.cachedEmployeeList = data;
+                                initializeDepartmentFilter();
+                            }
+                        })
+                        .catch(error => console.error('Error pre-loading employee list:', error));
+                }
+            }, 500);
         });
         
         // --- Render Active Data Table ---
         function renderActiveDataTable() {
             // Check which tab is active
             if (document.getElementById('nav-signinout').classList.contains('active')) {
-                renderTable('signinoutTableContainer', cachedTables.signinout.columns, cachedTables.signinout.data);
+                const data = departmentFilterData.signinout.filtered || cachedTables.signinout;
+                renderTable('signinoutTableContainer', data.columns, data.data);
             } else if (document.getElementById('nav-apply').classList.contains('active')) {
-                renderTable('applyTableContainer', cachedTables.apply.columns, cachedTables.apply.data, ['Type','Results','Leave Type']);
+                const data = departmentFilterData.apply.filtered || cachedTables.apply;
+                renderTable('applyTableContainer', data.columns, data.data, ['Type','Results','Leave Type']);
             } else if (document.getElementById('nav-otlieu').classList.contains('active')) {
-                renderTable('otlieuTableContainer', cachedTables.otlieu.columns, cachedTables.otlieu.data);
+                const data = departmentFilterData.otlieu.filtered || cachedTables.otlieu;
+                renderTable('otlieuTableContainer', data.columns, data.data);
             }
         }
 
@@ -2017,11 +2127,11 @@
             updateEditModeUI();
             
             if (isEditMode) {
-                // Store original data for potential rollback
+                // Store current filtered data for potential rollback
                 originalData = {
-                    signinout: JSON.parse(JSON.stringify(cachedTables.signinout)),
-                    apply: JSON.parse(JSON.stringify(cachedTables.apply)),
-                    otlieu: JSON.parse(JSON.stringify(cachedTables.otlieu))
+                    signinout: JSON.parse(JSON.stringify(departmentFilterData.signinout.filtered || cachedTables.signinout)),
+                    apply: JSON.parse(JSON.stringify(departmentFilterData.apply.filtered || cachedTables.apply)),
+                    otlieu: JSON.parse(JSON.stringify(departmentFilterData.otlieu.filtered || cachedTables.otlieu))
                 };
                 // Re-render current tab with edit mode
                 renderActiveDataTable();
@@ -2060,34 +2170,34 @@
             const promises = [];
             
             // Save Apply data changes
-            if (cachedTables.apply && cachedTables.apply.data) {
+            if (departmentFilterData.apply.filtered && departmentFilterData.apply.filtered.data) {
                 promises.push(
                     fetch('/save_apply_changes', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({data: cachedTables.apply.data})
+                        body: JSON.stringify({data: departmentFilterData.apply.filtered.data})
                     }).then(res => res.json())
                 );
             }
             
             // Save OT Lieu data changes
-            if (cachedTables.otlieu && cachedTables.otlieu.data) {
+            if (departmentFilterData.otlieu.filtered && departmentFilterData.otlieu.filtered.data) {
                 promises.push(
                     fetch('/save_otlieu_changes', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({data: cachedTables.otlieu.data})
+                        body: JSON.stringify({data: departmentFilterData.otlieu.filtered.data})
                     }).then(res => res.json())
                 );
             }
             
             // Save Sign In/Out data changes
-            if (cachedTables.signinout && cachedTables.signinout.data) {
+            if (departmentFilterData.signinout.filtered && departmentFilterData.signinout.filtered.data) {
                 promises.push(
                     fetch('/save_signinout_changes', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({data: cachedTables.signinout.data})
+                        body: JSON.stringify({data: departmentFilterData.signinout.filtered.data})
                     }).then(res => res.json())
                 );
             }
@@ -2098,6 +2208,8 @@
                     const allSuccess = results.every(r => r.success);
                     if (allSuccess) {
                         showAlert('success', 'All changes saved successfully!');
+                        // Sync filtered data back to original data
+                        syncFilteredDataToOriginal();
                         // Exit edit mode
                         isEditMode = false;
                         updateEditModeUI();
@@ -2115,10 +2227,10 @@
 
         function cancelEditMode() {
             if (confirm('Are you sure you want to cancel all changes? This will revert to the original data.')) {
-                // Restore original data
-                if (originalData.signinout) cachedTables.signinout = originalData.signinout;
-                if (originalData.apply) cachedTables.apply = originalData.apply;
-                if (originalData.otlieu) cachedTables.otlieu = originalData.otlieu;
+                // Restore filtered data
+                if (originalData.signinout) departmentFilterData.signinout.filtered = originalData.signinout;
+                if (originalData.apply) departmentFilterData.apply.filtered = originalData.apply;
+                if (originalData.otlieu) departmentFilterData.otlieu.filtered = originalData.otlieu;
                 
                 // Exit edit mode
                 isEditMode = false;
@@ -2144,13 +2256,13 @@
             
             console.log('Data type determined:', dataType);
             
-            // Update the cached data
-            if (cachedTables[dataType] && cachedTables[dataType].data) {
-                console.log('Cached data found for:', dataType);
+            // Update the filtered data
+            if (departmentFilterData[dataType] && departmentFilterData[dataType].filtered && departmentFilterData[dataType].filtered.data) {
+                console.log('Filtered data found for:', dataType);
                 
                 // For OT Lieu, handle special cases
                 if (dataType === 'otlieu') {
-                    const originalCell = cachedTables[dataType].data[rowIdx][colIdx];
+                    const originalCell = departmentFilterData[dataType].filtered.data[rowIdx][colIdx];
                     console.log('Original cell:', originalCell);
                     
                     // If it was an error cell with suggest value, and user enters the correct value
@@ -2162,36 +2274,63 @@
                         if (newValue == originalCell.suggest) {
                             console.log('User entered correct value, replacing error object');
                             // Replace the error object with the correct value
+                            departmentFilterData[dataType].filtered.data[rowIdx][colIdx] = newValue;
+                            // Also update the cached data for consistency
+                            if (cachedTables[dataType] && cachedTables[dataType].data) {
                             cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                            }
                             // Refresh table to show the corrected cell
                             setTimeout(() => refreshCurrentTable(), 100);
                         } else {
                             console.log('User entered different value, keeping error object');
                             // Keep the error object but update the value
+                            departmentFilterData[dataType].filtered.data[rowIdx][colIdx] = {
+                                value: newValue,
+                                error: true,
+                                suggest: originalCell.suggest
+                            };
+                            // Also update the cached data for consistency
+                            if (cachedTables[dataType] && cachedTables[dataType].data) {
                             cachedTables[dataType].data[rowIdx][colIdx] = {
                                 value: newValue,
                                 error: true,
                                 suggest: originalCell.suggest
                             };
+                            }
                         }
                     } else if (originalCell && typeof originalCell === 'object' && originalCell.warning) {
                         console.log('Processing warning cell');
                         // For warning cells, update the value but keep warning status
+                        departmentFilterData[dataType].filtered.data[rowIdx][colIdx] = {
+                            value: newValue,
+                            warning: true
+                        };
+                        // Also update the cached data for consistency
+                        if (cachedTables[dataType] && cachedTables[dataType].data) {
                         cachedTables[dataType].data[rowIdx][colIdx] = {
                             value: newValue,
                             warning: true
                         };
+                        }
                     } else {
                         console.log('Normal cell update');
                         // Normal update
+                        departmentFilterData[dataType].filtered.data[rowIdx][colIdx] = newValue;
+                        // Also update the cached data for consistency
+                        if (cachedTables[dataType] && cachedTables[dataType].data) {
                         cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                        }
                     }
                     
                     console.log('OT Lieu cell updated:', rowIdx, colIdx, newValue);
                 } else {
                     console.log('Non-OT Lieu cell update');
                     // For other data types, simple update
+                    departmentFilterData[dataType].filtered.data[rowIdx][colIdx] = newValue;
+                    // Also update the cached data for consistency
+                    if (cachedTables[dataType] && cachedTables[dataType].data) {
                     cachedTables[dataType].data[rowIdx][colIdx] = newValue;
+                    }
                 }
                 
                 // Show a small indicator that the cell was updated
@@ -2202,7 +2341,7 @@
                     setTimeout(() => {
                         // Restore original styling based on cell type
                         if (dataType === 'otlieu') {
-                            const originalCell = cachedTables[dataType].data[rowIdx][colIdx];
+                            const originalCell = departmentFilterData[dataType].filtered.data[rowIdx][colIdx];
                             if (originalCell && typeof originalCell === 'object' && originalCell.error) {
                                 cell.style.borderColor = '#d32f2f';
                                 cell.style.color = '#d32f2f';
@@ -2220,7 +2359,7 @@
                     }, 1000);
                 }
             } else {
-                console.error('No cached data found for:', dataType);
+                console.error('No filtered data found for:', dataType);
             }
         }
         
@@ -2595,7 +2734,12 @@
                     .then(data => {
                         if (data.success) {
                             alert(data.message);
+                            // Refresh employee list and department filter
                             reloadEmployeeList();
+                            // Also refresh department filter with new data
+                            setTimeout(() => {
+                                initializeDepartmentFilter();
+                            }, 300);
                         } else {
                             alert(data.error);
                         }
@@ -2609,6 +2753,10 @@
                 .then(res => res.text())
                 .then(html => {
                     document.getElementById('employeeListContent').innerHTML = html;
+                    // Also refresh department filter when employee list is reloaded
+                    if (window.cachedEmployeeList) {
+                        initializeDepartmentFilter();
+                    }
                 });
         }
 
@@ -2690,14 +2838,7 @@
                 }
             });
             
-            // Add event listeners for date range inputs
-            const dateInputs = ['dataStartDate', 'dataEndDate'];
-            dateInputs.forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.addEventListener('change', updateDateRangeStatus);
-                }
-            });
+
         });
         // EMPLOYEE ADD FORM HANDLER
         (function() {
