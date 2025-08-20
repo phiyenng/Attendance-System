@@ -2237,7 +2237,7 @@
             const pageSize = 50;
             let currentPage = 1;
             const totalPages = Math.ceil(rows.length / pageSize);
-            let editingRow = null;
+            // Bỏ biến editingRow - sử dụng Edit Mode chung
             
             function renderPage(page) {
                 currentPage = page;
@@ -2330,22 +2330,22 @@
                         } else if (cell && typeof cell === 'object' && cell.gray) {
                             // --- GRAY CELL LOGIC ---
                             html += `<td class="${tdClass}" style="background:#f2f2f2;color:#888;">${displayValue}</td>`;
-                        } else if (columns.includes('Results') && editingRow === realIdx) {
-                            // Nếu là dòng đang edit trong bảng Apply
+                        } else if (isEditMode && columns.includes('Results')) {
+                            // Edit Mode cho Apply Table - hiển thị dropdown cho các cột có thể edit
                             if (col === 'Type') {
-                                html += `<td><select class="form-select form-select-sm" id="edit_Type_${realIdx}">`;
+                                html += `<td><select class="form-select form-select-sm" onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">`;
                                 (applyColumnOptions.Type || []).forEach(opt => {
                                     html += `<option value="${opt}" ${cell === opt ? 'selected' : ''}>${opt}</option>`;
                                 });
                                 html += `</select></td>`;
                             } else if (col === 'Leave Type') {
-                                html += `<td><select class="form-select form-select-sm" id="edit_Leave_Type_${realIdx}">`;
+                                html += `<td><select class="form-select form-select-sm" onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">`;
                                 (applyColumnOptions["Leave Type"] || []).forEach(opt => {
                                     html += `<option value="${opt}" ${cell === opt ? 'selected' : ''}>${opt}</option>`;
                                 });
                                 html += `</select></td>`;
                             } else if (col === 'Results') {
-                                html += `<td><select class="form-select form-select-sm" id="editResults_${realIdx}">
+                                html += `<td><select class="form-select form-select-sm" onchange="updateCellValue('${containerId}',${realIdx},${j},this.value)">
                                     <option value="Approved" ${cell === "Approved" ? "selected" : ""}>Approved</option>
                                     <option value="Pending" ${cell === "Pending" ? "selected" : ""}>Pending</option>
                                     <option value="Reject" ${cell === "Reject" ? "selected" : ""}>Reject</option>
@@ -2412,13 +2412,7 @@
                             html += `<td class="${tdClass}">${displayValue}</td>`;
                         }
                     }
-                    if (columns.includes('Results')) {
-                        if (editingRow === realIdx) {
-                            html += `<td><button class='btn btn-sm btn-success' onclick='saveEditRow(${realIdx})'>Save</button> <button class='btn btn-sm btn-secondary' onclick='cancelEditRow()'>Cancel</button></td>`;
-                        } else {
-                            html += `<td><button class='btn btn-sm btn-outline-primary' onclick='editRow(${realIdx})'>Edit</button></td>`;
-                        }
-                    }
+                    // Bỏ nút edit riêng lẻ - sử dụng Edit Mode chung
                     html += '</tr>';
                 }
                 html += '</tbody></table></div>';
@@ -2579,54 +2573,7 @@
                     }
                 });
             };
-            window.editRow = function(idx) {
-                // Save scroll position before re-render
-                const container = document.getElementById(containerId);
-                lastScrollTop = container.scrollTop;
-                lastScrollLeft = container.scrollLeft;
-                editingRow = idx;
-                renderPage(Math.floor(idx / pageSize) + 1);
-            };
-            window.cancelEditRow = function() {
-                // Save scroll position before re-render
-                const container = document.getElementById(containerId);
-                lastScrollTop = container.scrollTop;
-                lastScrollLeft = container.scrollLeft;
-                editingRow = null;
-                renderPage(currentPage);
-            };
-            window.saveEditRow = function(idx) {
-                const updates = {};
-                if (document.getElementById(`edit_Type_${idx}`)) {
-                    updates['Type'] = document.getElementById(`edit_Type_${idx}`).value;
-                }
-                if (document.getElementById(`edit_Leave_Type_${idx}`)) {
-                    updates['Leave Type'] = document.getElementById(`edit_Leave_Type_${idx}`).value;
-                }
-                if (document.getElementById(`editResults_${idx}`)) {
-                    updates['Results'] = document.getElementById(`editResults_${idx}`).value;
-                }
-                // Gửi từng update
-                const updatePromises = Object.entries(updates).map(([col, value]) =>
-                    fetch('/update_apply_row', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({index: idx, column: col, value: value})
-                    }).then(res => res.json())
-                );
-                Promise.all(updatePromises).then(results => {
-                    let ok = results.every(r => r.success);
-                    if (ok) {
-                        if ('Type' in updates) rows[idx][columns.indexOf('Type')] = updates['Type'];
-                        if ('Leave Type' in updates) rows[idx][columns.indexOf('Leave Type')] = updates['Leave Type'];
-                        if ('Results' in updates) rows[idx][columns.indexOf('Results')] = updates['Results'];
-                        editingRow = null;
-                        renderPage(Math.floor(idx / pageSize) + 1);
-                    } else {
-                        alert('Update failed!');
-                    }
-                });
-            };
+
             renderPage(currentPage);
         }
         
