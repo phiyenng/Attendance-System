@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+uploads/*
+rawdata/*
+static/*.ico
+static/*.png
+static/*.svg
+.env
+.vscode/
+.git/
+.gitignore

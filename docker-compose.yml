@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  attendance-app:
+    build: .
+    container_name: attendance-system
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=your-secret-key-here-change-in-production
+    volumes:
+      - ./uploads:/app/uploads
+      - ./rawdata:/app/rawdata
+    restart: unless-stopped
+    # Uncomment below if you want to keep logs outside container
+    # logging:
+    #   driver: "json-file"
+    #   options:
+    #     max-size: "10m"
+    #     max-file: "3"
